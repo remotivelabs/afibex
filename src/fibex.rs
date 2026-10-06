@@ -2394,7 +2394,7 @@ impl CompuScale {
             });
         // <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">1048576</ho:LOWER-LIMIT>
         let lower_limit = xml_e.child_by_name("LOWER-LIMIT").map(IntervalType::from);
-        let upper_limit = xml_e.child_by_name("LOWER-LIMIT").map(IntervalType::from);
+        let upper_limit = xml_e.child_by_name("UPPER-LIMIT").map(IntervalType::from);
 
         Ok(CompuScale {
             mask,
@@ -2593,7 +2593,7 @@ mod tests {
         let r = fb.load_fibex_file(path);
         assert!(r.is_ok(), "{:?}", r.err());
         assert_eq!(fb.parse_warnings.len(), 0);
-        assert_eq!(fb.pi.codings.len(), 3);
+        assert_eq!(fb.pi.codings.len(), 4);
         assert_eq!(fb.elements.datatypes_map_by_id.len(), 5);
         let dt = &fb
             .elements
@@ -2606,6 +2606,28 @@ mod tests {
         } else {
             panic!()
         }
+
+        let coding = fb
+            .pi
+            .codings
+            .get("CURRENT_PROJECT_UInt8_validRange_coding")
+            .unwrap();
+        assert_eq!(coding.compu_methods.len(), 1);
+        let compu_method = &coding.compu_methods[0];
+        assert_eq!(compu_method.category, CompuCategory::TextTable);
+        assert_eq!(compu_method.internal_to_phys_scales.len(), 2);
+        let range = &compu_method.internal_to_phys_scales[0];
+        assert_eq!(
+            range.lower_limit.as_ref().unwrap().0,
+            std::ops::Bound::Included(XsDouble::I64(0))
+        );
+        assert_eq!(
+            range.upper_limit.as_ref().unwrap().0,
+            std::ops::Bound::Included(XsDouble::I64(100))
+        );
+        assert_eq!(range.get_single_value(), None);
+        let single = &compu_method.internal_to_phys_scales[1];
+        assert_eq!(single.get_single_value(), Some(&XsDouble::I64(255)));
 
         println!("fb={:?}", fb);
     }

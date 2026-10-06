@@ -175,6 +175,30 @@
                 </ho:COMPU-METHOD>
                 </ho:COMPU-METHODS>
             </fx:CODING>
+            <fx:CODING ID="CURRENT_PROJECT_UInt8_validRange_coding">
+                <ho:SHORT-NAME>CODING_UInt8_validRange</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:SHORT-NAME>COMPUMETHOD_UInt8_validRange</ho:SHORT-NAME>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">0</ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">100</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:VT>valid</ho:VT></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    <ho:COMPU-SCALE>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">255</ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">255</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:VT>invalid</ho:VT></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
         </fx:CODINGS>
     </fx:PROCESSING-INFORMATION>
 </fx:FIBEX>
