@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:service="http://www.asam.net/xml/fbx/services" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+    <fx:PROJECT ID="event_groups">
+        <ho:SHORT-NAME>event_groups</ho:SHORT-NAME>
+    </fx:PROJECT>
+    <fx:ELEMENTS>
+        <fx:SERVICE-INTERFACES>
+            <fx:SERVICE-INTERFACE xsi:type="service:SERVICE-INTERFACE-TYPE" ID="/S/SimpleService">
+                <ho:SHORT-NAME>SimpleService</ho:SHORT-NAME>
+                <fx:SERVICE-IDENTIFIER>100</fx:SERVICE-IDENTIFIER>
+                <service:API-VERSION>
+                    <service:MAJOR>1</service:MAJOR>
+                    <service:MINOR>0</service:MINOR>
+                </service:API-VERSION>
+                <service:EVENTS>
+                    <service:EVENT ID="/S/SimpleService/Event_Moved">
+                        <ho:SHORT-NAME>Moved</ho:SHORT-NAME>
+                        <service:METHOD-IDENTIFIER>32769</service:METHOD-IDENTIFIER>
+                        <service:INPUT-PARAMETERS>
+                            <service:INPUT-PARAMETER ID="/S/SimpleService/Event_Moved/Position">
+                                <ho:SHORT-NAME>Position</ho:SHORT-NAME>
+                                <fx:DATATYPE-REF ID-REF="/DT/UINT8"/>
+                                <service:POSITION>0</service:POSITION>
+                            </service:INPUT-PARAMETER>
+                        </service:INPUT-PARAMETERS>
+                    </service:EVENT>
+                </service:EVENTS>
+                <service:FIELDS>
+                    <service:FIELD ID="/S/SimpleService/Field_Height">
+                        <ho:SHORT-NAME>Height</ho:SHORT-NAME>
+                        <fx:DATATYPE-REF ID-REF="/DT/UINT8"/>
+                        <service:GETTER>
+                            <service:METHOD-IDENTIFIER>10</service:METHOD-IDENTIFIER>
+                        </service:GETTER>
+                        <service:NOTIFIER>
+                            <service:NOTIFICATION-IDENTIFIER>32770</service:NOTIFICATION-IDENTIFIER>
+                        </service:NOTIFIER>
+                    </service:FIELD>
+                </service:FIELDS>
+                <service:EVENT-GROUPS>
+                    <service:EVENT-GROUP ID="/S/SimpleService/EventGroup_AllEvents">
+                        <ho:SHORT-NAME>AllEvents</ho:SHORT-NAME>
+                        <fx:SERVICE-IDENTIFIER>321</fx:SERVICE-IDENTIFIER>
+                        <service:EVENT-REFS>
+                            <service:EVENT-REF ID-REF="/S/SimpleService/Event_Moved"/>
+                        </service:EVENT-REFS>
+                    </service:EVENT-GROUP>
+                    <service:EVENT-GROUP ID="/S/SimpleService/EventGroup_Height">
+                        <ho:SHORT-NAME>Height</ho:SHORT-NAME>
+                        <fx:SERVICE-IDENTIFIER>322</fx:SERVICE-IDENTIFIER>
+                        <service:EVENT-REFS>
+                            <service:EVENT-REF ID-REF="/S/SimpleService/Event_Moved"/>
+                        </service:EVENT-REFS>
+                        <service:FIELD-REFS>
+                            <service:FIELD-REF ID-REF="/S/SimpleService/Field_Height"/>
+                        </service:FIELD-REFS>
+                    </service:EVENT-GROUP>
+                </service:EVENT-GROUPS>
+            </fx:SERVICE-INTERFACE>
+        </fx:SERVICE-INTERFACES>
+        <fx:DATATYPES>
+            <fx:DATATYPE xsi:type="fx:COMMON-DATATYPE-TYPE" ID="/DT/UINT8">
+                <ho:SHORT-NAME>UINT8</ho:SHORT-NAME>
+                <fx:CODING-REF ID-REF="/C/UINT8"/>
+            </fx:DATATYPE>
+        </fx:DATATYPES>
+    </fx:ELEMENTS>
+    <fx:PROCESSING-INFORMATION>
+        <fx:CODINGS>
+            <fx:CODING ID="/C/UINT8">
+                <ho:SHORT-NAME>UINT8</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE">
+                    <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+                </ho:CODED-TYPE>
+            </fx:CODING>
+        </fx:CODINGS>
+    </fx:PROCESSING-INFORMATION>
+</fx:FIBEX>
