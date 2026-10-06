@@ -391,9 +391,23 @@ pub struct Service {
     // methods: Vec<()>,
     // fields put directly into methods?
     pub fields: Vec<Arc<Parameter>>,
-    // event-groups?
+    pub event_groups: Vec<EventGroup>,
     pub methods_by_mid: HashMap<u16, MethodIdType>, // covers fields and events as well (getter, setter)
                                                     // MODIFIERS?
+}
+
+/// service:EVENT-GROUP-TYPE https://www.asam.net/xml/fbx/services/fibex4services.xsd
+///
+/// The events, and the fields whose notifier, a client subscribes to together. The refs are the
+/// IDs of the service's EVENTs and FIELDs.
+#[derive(Debug)]
+pub struct EventGroup {
+    pub id: String,
+    pub short_name: Option<String>,
+    pub desc: Option<String>,
+    pub event_group_identifier: Option<u16>, // the SERVICE-IDENTIFIER element of the group, which is the event group id on the wire (PRS_SOMEIPSD)
+    pub event_refs: Vec<String>,
+    pub field_refs: Vec<String>,
 }
 
 /// fx:SERIALIZATION-ATTRIBUTES-TYPE
@@ -977,6 +991,7 @@ impl FibexData {
         let mut service_identifier: Option<u16> = None;
         let mut methods_by_mid = HashMap::new();
         let mut fields = vec![];
+        let mut event_groups = vec![];
 
         let id = e_si
             .attributes()
@@ -1045,7 +1060,18 @@ impl FibexData {
 
                         fields.push(field);
                     }
-                    b"EVENT-GROUPS" => skip_element(e, reader)?, // todo!
+                    b"EVENT-GROUPS" => {} // we ignore to get the EVENT-GROUP events
+                    b"EVENT-GROUP" => match self.parse_event_group(e, reader) {
+                        Ok(event_group) => event_groups.push(event_group),
+                        Err(err) => {
+                            self.add_distinct_warning(format!(
+                                "parse_service_interface: Ignoring event group due to Err '{}'",
+                                err
+                            ));
+                            // a rejected group stops at a child boundary, so skip its remaining children
+                            skip_element(e, reader)?
+                        }
+                    },
                     _ => {
                         self.add_distinct_warning(format!(
                             "parse_service_interface: Event::Start of unknown '{}'",
@@ -1070,6 +1096,7 @@ impl FibexData {
             api_version,
             service_identifier,
             fields,
+            event_groups,
             methods_by_mid,
         };
         Ok(si)
@@ -1856,6 +1883,88 @@ impl FibexData {
         Ok((mid, *key))
     }
 
+    fn parse_event_group<T: BufRead>(
+        &mut self,
+        e_group: &quick_xml::events::BytesStart,
+        reader: &mut Reader<T>,
+    ) -> Result<EventGroup, Box<dyn Error>> {
+        let mut buf = Vec::with_capacity(4 * 1024);
+        let mut short_name: Option<String> = None;
+        let mut desc: Option<String> = None;
+        let mut event_group_identifier: Option<u16> = None;
+        let mut event_refs = vec![];
+        let mut field_refs = vec![];
+
+        let id = e_group
+            .attributes()
+            .flatten()
+            .find(|a| a.key == b"ID")
+            .and_then(|attribute| String::from_utf8(attribute.value.to_vec()).ok())
+            .ok_or_else(|| FibexError::new("ID missing in EventGroup"))?;
+
+        fn id_ref(e: &quick_xml::events::BytesStart) -> Option<String> {
+            e.attributes()
+                .flatten()
+                .find(|a| a.key == b"ID-REF")
+                .and_then(|attribute| String::from_utf8(attribute.value.to_vec()).ok())
+        }
+
+        loop {
+            match reader.read_event(&mut buf)? {
+                Event::Start(ref e) => match e.local_name() {
+                    b"SHORT-NAME" => {
+                        short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
+                    }
+                    b"DESC" => desc = Some(reader.read_text(e.name(), &mut Vec::new())?),
+                    b"SERVICE-IDENTIFIER" => {
+                        event_group_identifier = Some(
+                            reader
+                                .read_text(e.name(), &mut Vec::new())?
+                                .parse::<u16>()?,
+                        )
+                    }
+                    b"EVENT-REFS" | b"FIELD-REFS" => {} // ignore, we parse the refs directly
+                    b"EVENT-REF" => {
+                        event_refs.extend(id_ref(e));
+                        skip_element(e, reader)?
+                    }
+                    b"FIELD-REF" => {
+                        field_refs.extend(id_ref(e));
+                        skip_element(e, reader)?
+                    }
+                    b"MANUFACTURER-EXTENSION" => skip_element(e, reader)?,
+                    _ => {
+                        self.add_distinct_warning(format!(
+                            "parse_event_group: Event::Start of unknown '{}'",
+                            String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
+                        ));
+                        skip_element(e, reader)?
+                    }
+                },
+                Event::Empty(ref e) => match e.local_name() {
+                    b"EVENT-REF" => event_refs.extend(id_ref(e)),
+                    b"FIELD-REF" => field_refs.extend(id_ref(e)),
+                    b"PACKAGE-REF" => {}
+                    _ => self.add_distinct_warning(format!(
+                        "parse_event_group: Event::Empty of unknown '{}'",
+                        String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
+                    )),
+                },
+                Event::End(ref e) if e.local_name() == e_group.local_name() => break,
+                _ => {}
+            }
+        }
+
+        Ok(EventGroup {
+            id,
+            short_name,
+            desc,
+            event_group_identifier,
+            event_refs,
+            field_refs,
+        })
+    }
+
     fn parse_parameter<T: BufRead>(
         &mut self,
         e_pa: &quick_xml::events::BytesStart,
@@ -2608,6 +2717,58 @@ mod tests {
         }
 
         println!("fb={:?}", fb);
+    }
+
+    #[test]
+    fn load_event_groups() {
+        let mut fb = FibexData::new();
+        let path = Path::new("tests/fibex_event_groups.xml");
+        assert!(path.exists());
+        let r = fb.load_fibex_file(path);
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert!(fb.parse_warnings.is_empty(), "{:?}", fb.parse_warnings);
+
+        let services = fb
+            .elements
+            .services_map_by_sid_major
+            .get(&(100, 1))
+            .unwrap();
+        assert_eq!(services.len(), 1);
+        let groups = &services[0].event_groups;
+        assert_eq!(groups.len(), 2);
+
+        assert_eq!(groups[0].short_name.as_deref(), Some("AllEvents"));
+        assert_eq!(groups[0].event_group_identifier, Some(321));
+        assert_eq!(groups[0].event_refs, vec!["/S/SimpleService/Event_Moved"]);
+        assert!(groups[0].field_refs.is_empty());
+
+        assert_eq!(groups[1].event_group_identifier, Some(322));
+        assert_eq!(groups[1].event_refs, vec!["/S/SimpleService/Event_Moved"]);
+        assert_eq!(groups[1].field_refs, vec!["/S/SimpleService/Field_Height"]);
+    }
+
+    #[test]
+    fn load_event_groups_skips_rejected_groups() {
+        let mut fb = FibexData::new();
+        let r = fb.load_fibex_file(Path::new("tests/fibex_event_groups_rejected.xml"));
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert_eq!(fb.parse_warnings.len(), 2, "{:?}", fb.parse_warnings);
+        assert!(fb
+            .parse_warnings
+            .iter()
+            .all(|w| w.contains("Ignoring event group")));
+
+        let services = fb
+            .elements
+            .services_map_by_sid_major
+            .get(&(100, 1))
+            .unwrap();
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].short_name.as_deref(), Some("SimpleService"));
+        assert_eq!(services[0].service_identifier, Some(100));
+        let groups = &services[0].event_groups;
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].short_name.as_deref(), Some("Valid"));
     }
 
     #[test]

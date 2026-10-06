@@ -469,6 +469,7 @@ impl FibexData {
                             u8::try_from(minor.unwrap_or_default()).unwrap_or_default(),
                         ),
                         fields,
+                        event_groups: vec![],
                         methods_by_mid,
                     };
                     self.elements

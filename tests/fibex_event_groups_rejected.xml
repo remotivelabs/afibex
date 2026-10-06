@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:service="http://www.asam.net/xml/fbx/services" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+    <fx:PROJECT ID="event_groups_rejected">
+        <ho:SHORT-NAME>event_groups_rejected</ho:SHORT-NAME>
+    </fx:PROJECT>
+    <fx:ELEMENTS>
+        <fx:SERVICE-INTERFACES>
+            <fx:SERVICE-INTERFACE xsi:type="service:SERVICE-INTERFACE-TYPE" ID="/S/SimpleService">
+                <ho:SHORT-NAME>SimpleService</ho:SHORT-NAME>
+                <fx:SERVICE-IDENTIFIER>100</fx:SERVICE-IDENTIFIER>
+                <service:API-VERSION>
+                    <service:MAJOR>1</service:MAJOR>
+                    <service:MINOR>0</service:MINOR>
+                </service:API-VERSION>
+                <service:EVENT-GROUPS>
+                    <service:EVENT-GROUP>
+                        <ho:SHORT-NAME>MissingId</ho:SHORT-NAME>
+                        <fx:SERVICE-IDENTIFIER>999</fx:SERVICE-IDENTIFIER>
+                    </service:EVENT-GROUP>
+                    <service:EVENT-GROUP ID="/S/SimpleService/EventGroup_BadIdentifier">
+                        <fx:SERVICE-IDENTIFIER>not-a-number</fx:SERVICE-IDENTIFIER>
+                        <ho:SHORT-NAME>BadIdentifier</ho:SHORT-NAME>
+                    </service:EVENT-GROUP>
+                    <service:EVENT-GROUP ID="/S/SimpleService/EventGroup_Valid">
+                        <ho:SHORT-NAME>Valid</ho:SHORT-NAME>
+                        <fx:SERVICE-IDENTIFIER>321</fx:SERVICE-IDENTIFIER>
+                    </service:EVENT-GROUP>
+                </service:EVENT-GROUPS>
+            </fx:SERVICE-INTERFACE>
+        </fx:SERVICE-INTERFACES>
+    </fx:ELEMENTS>
+</fx:FIBEX>
