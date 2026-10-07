@@ -784,7 +784,7 @@ impl FibexData {
                     if let Some(id) = id {
                         methods_by_mid.insert(
                             id,
-                            MethodIdType::Method(Method {
+                            MethodIdType::Event(Method {
                                 id: broadcast_name.to_owned(), // or sd_name?
                                 short_name,
                                 desc,
