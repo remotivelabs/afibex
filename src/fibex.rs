@@ -519,7 +519,8 @@ pub struct Method {
     pub short_name: Option<String>,
     pub desc: Option<String>,
     pub method_identifier: Option<u16>, // non opt by spec but string todo
-    /// the CALL-SEMANTIC; None when the file leaves it out, which the schema defaults to REQUEST_RESPONSE
+    /// a method's CALL-SEMANTIC; None when the file leaves it out, which the schema defaults to
+    /// REQUEST_RESPONSE. An event has none.
     pub call_semantic: Option<CallSemantic>,
     pub input_params: Vec<Parameter>,
     pub return_params: Vec<Parameter>,
@@ -2860,6 +2861,14 @@ mod tests {
         assert!(ets.methods_by_mid.contains_key(&32775)); // attributes / fields notifier
         assert!(ets.methods_by_mid.contains_key(&32779)); // broadcasts / events TestEventUINT8Multicast
         assert!(ets.methods_by_mid.contains_key(&32770)); // broadcasts / events TestEventUINT8Array
+        assert!(matches!(
+            ets.methods_by_mid.get(&32779),
+            Some(MethodIdType::Event(_))
+        ));
+        assert!(matches!(
+            ets.methods_by_mid.get(&25),
+            Some(MethodIdType::Method(_))
+        ));
 
         assert!(fb.validate_datatypes().is_ok());
     }
