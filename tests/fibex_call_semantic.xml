@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:service="http://www.asam.net/xml/fbx/services" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+    <fx:PROJECT ID="call_semantic">
+        <ho:SHORT-NAME>call_semantic</ho:SHORT-NAME>
+    </fx:PROJECT>
+    <fx:ELEMENTS>
+        <fx:SERVICE-INTERFACES>
+            <fx:SERVICE-INTERFACE xsi:type="service:SERVICE-INTERFACE-TYPE" ID="/S/CallService">
+                <ho:SHORT-NAME>CallService</ho:SHORT-NAME>
+                <fx:SERVICE-IDENTIFIER>100</fx:SERVICE-IDENTIFIER>
+                <service:API-VERSION>
+                    <service:MAJOR>1</service:MAJOR>
+                    <service:MINOR>0</service:MINOR>
+                </service:API-VERSION>
+                <service:METHODS>
+                    <service:METHOD ID="/S/CallService/Method_Reset">
+                        <ho:SHORT-NAME>Reset</ho:SHORT-NAME>
+                        <service:METHOD-IDENTIFIER>1</service:METHOD-IDENTIFIER>
+                        <service:CALL-SEMANTIC>FIRE_AND_FORGET</service:CALL-SEMANTIC>
+                    </service:METHOD>
+                    <service:METHOD ID="/S/CallService/Method_Get">
+                        <ho:SHORT-NAME>Get</ho:SHORT-NAME>
+                        <service:METHOD-IDENTIFIER>2</service:METHOD-IDENTIFIER>
+                    </service:METHOD>
+                    <service:METHOD ID="/S/CallService/Method_Ask">
+                        <ho:SHORT-NAME>Ask</ho:SHORT-NAME>
+                        <service:METHOD-IDENTIFIER>3</service:METHOD-IDENTIFIER>
+                        <service:CALL-SEMANTIC>REQUEST_RESPONSE</service:CALL-SEMANTIC>
+                    </service:METHOD>
+                </service:METHODS>
+                <service:EVENTS>
+                    <service:EVENT ID="/S/CallService/Event_Moved">
+                        <ho:SHORT-NAME>Moved</ho:SHORT-NAME>
+                        <service:METHOD-IDENTIFIER>32769</service:METHOD-IDENTIFIER>
+                        <service:CALL-SEMANTIC>FIRE_AND_FORGET</service:CALL-SEMANTIC>
+                    </service:EVENT>
+                </service:EVENTS>
+            </fx:SERVICE-INTERFACE>
+        </fx:SERVICE-INTERFACES>
+    </fx:ELEMENTS>
+</fx:FIBEX>
