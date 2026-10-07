@@ -502,6 +502,15 @@ pub struct ComplexDatatypeMember { // fx:COMPLEX-DATATYPE-MEMBER
     pub data_id: Option<u32>,
 }*/
 
+/// service:CALL-SEMANTIC-TYPE https://www.asam.net/xml/fbx/services/fibex4services.xsd
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallSemantic {
+    Synchronous,
+    Asynchronous,
+    RequestResponse,
+    FireAndForget,
+}
+
 /// service:METHOD-TYPE https://www.asam.net/xml/fbx/services/fibex4services.xsd
 /// todo: check params... vs. spec
 #[derive(Debug)]
@@ -510,6 +519,8 @@ pub struct Method {
     pub short_name: Option<String>,
     pub desc: Option<String>,
     pub method_identifier: Option<u16>, // non opt by spec but string todo
+    /// the CALL-SEMANTIC; None when the file leaves it out, which the schema defaults to REQUEST_RESPONSE
+    pub call_semantic: Option<CallSemantic>,
     pub input_params: Vec<Parameter>,
     pub return_params: Vec<Parameter>,
     // exceptions
@@ -1796,6 +1807,7 @@ impl FibexData {
         let mut short_name: Option<String> = None;
         let mut desc: Option<String> = None;
         let mut method_identifier: Option<u16> = None;
+        let mut call_semantic: Option<CallSemantic> = None;
         let mut input_params = vec![];
         let mut return_params = vec![];
 
@@ -1840,9 +1852,23 @@ impl FibexData {
                         //let key = method.method_identifier.unwrap_or_default();
                         //methods_by_mid.insert(key, method); // todo ignore duplicates?
                     }
-                    b"RELIABLE" | b"MANUFACTURER-EXTENSION" | b"CALL-SEMANTIC" => {
-                        skip_element(e, reader)?
-                    } // todo!
+                    b"CALL-SEMANTIC" => {
+                        let text = reader.read_text(e.name(), &mut Vec::new())?;
+                        call_semantic = match text.as_str() {
+                            "SYNCHRONOUS" => Some(CallSemantic::Synchronous),
+                            "ASYNCHRONOUS" => Some(CallSemantic::Asynchronous),
+                            "REQUEST_RESPONSE" => Some(CallSemantic::RequestResponse),
+                            "FIRE_AND_FORGET" => Some(CallSemantic::FireAndForget),
+                            other => {
+                                self.add_distinct_warning(format!(
+                                    "parse_method: unknown CALL-SEMANTIC '{}'",
+                                    other
+                                ));
+                                None
+                            }
+                        };
+                    }
+                    b"RELIABLE" | b"MANUFACTURER-EXTENSION" => skip_element(e, reader)?, // todo!
                     _ => {
                         self.add_distinct_warning(format!(
                             "parse_method: Event::Start of unknown '{}'",
@@ -1872,6 +1898,7 @@ impl FibexData {
             method_identifier,
             short_name,
             desc,
+            call_semantic,
             input_params,
             return_params,
         };
@@ -2791,6 +2818,23 @@ mod tests {
         let groups = &services[0].event_groups;
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].short_name.as_deref(), Some("Valid"));
+    }
+
+    #[test]
+    fn load_call_semantic() {
+        let mut fb = FibexData::new();
+        let r = fb.load_fibex_file(Path::new("tests/fibex_call_semantic.xml"));
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert!(fb.parse_warnings.is_empty(), "{:?}", fb.parse_warnings);
+        let service = &fb.elements.services_map_by_sid_major[&(100, 1)][0];
+        let call_semantic = |mid: u16| match &service.methods_by_mid[&mid] {
+            MethodIdType::Method(m) | MethodIdType::Event(m) => m.call_semantic,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(call_semantic(1), Some(CallSemantic::FireAndForget));
+        assert_eq!(call_semantic(2), None);
+        assert_eq!(call_semantic(3), Some(CallSemantic::RequestResponse));
+        assert_eq!(call_semantic(32769), Some(CallSemantic::FireAndForget));
     }
 
     #[test]
