@@ -24,6 +24,182 @@
                     </fx:MEMBER>
                 </fx:MEMBERS>
             </fx:DATATYPE>
+            <fx:DATATYPE xsi:type="fx:ENUM-DATATYPE-TYPE" ID="Enum">
+                <ho:SHORT-NAME>Enum</ho:SHORT-NAME>
+                <fx:CODING-REF ID-REF="Good"/>
+                <fx:ENUMERATION-ELEMENTS>
+                <fx:ENUM-ELEMENT>
+                    <fx:VALUE>one</fx:VALUE>
+                    <fx:SYNONYM>Malformed</fx:SYNONYM>
+                </fx:ENUM-ELEMENT>
+                <fx:ENUM-ELEMENT>
+                    <fx:VALUE/>
+                    <fx:SYNONYM>Empty</fx:SYNONYM>
+                </fx:ENUM-ELEMENT>
+                <fx:ENUM-ELEMENT>
+                    <fx:VALUE>2</fx:VALUE>
+                    <fx:SYNONYM>Valid</fx:SYNONYM>
+                </fx:ENUM-ELEMENT>
+                </fx:ENUMERATION-ELEMENTS>
+            </fx:DATATYPE>
         </fx:DATATYPES>
     </fx:ELEMENTS>
+    <fx:PROCESSING-INFORMATION>
+        <fx:CODINGS>
+            <fx:CODING ID="BadBitLength">
+                <ho:SHORT-NAME>BadBitLength</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE">
+                    <ho:BIT-LENGTH>eight</ho:BIT-LENGTH>
+                </ho:CODED-TYPE>
+            </fx:CODING>
+            <fx:CODING ID="EmptyBitLength">
+                <ho:SHORT-NAME>EmptyBitLength</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE">
+                    <ho:BIT-LENGTH/>
+                </ho:CODED-TYPE>
+            </fx:CODING>
+            <fx:CODING ID="BadMinLength">
+                <ho:SHORT-NAME>BadMinLength</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="MIN-MAX-LENGTH-TYPE">
+                    <ho:MIN-LENGTH>short</ho:MIN-LENGTH>
+                    <ho:MAX-LENGTH>8</ho:MAX-LENGTH>
+                </ho:CODED-TYPE>
+            </fx:CODING>
+            <fx:CODING ID="EmptyMaxLength">
+                <ho:SHORT-NAME>EmptyMaxLength</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="MIN-MAX-LENGTH-TYPE">
+                    <ho:MIN-LENGTH>1</ho:MIN-LENGTH>
+                    <ho:MAX-LENGTH></ho:MAX-LENGTH>
+                </ho:CODED-TYPE>
+            </fx:CODING>
+            <fx:CODING ID="BadLimit">
+                <ho:SHORT-NAME>BadLimit</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">low</ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">1</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:VT>off</ho:VT></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
+            <fx:CODING ID="EmptyLimit">
+                <ho:SHORT-NAME>EmptyLimit</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED"></ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">1</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:VT>off</ho:VT></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
+            <fx:CODING ID="BadMask">
+                <ho:SHORT-NAME>BadMask</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:MASK>12</ho:MASK>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">0</ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">1</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:VT>off</ho:VT></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
+            <fx:CODING ID="EmptyMask">
+                <ho:SHORT-NAME>EmptyMask</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:MASK/>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">0</ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">1</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:VT>off</ho:VT></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
+            <fx:CODING ID="BadConst">
+                <ho:SHORT-NAME>BadConst</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">0</ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">1</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:V>inf</ho:V></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
+            <fx:CODING ID="EmptyConst">
+                <ho:SHORT-NAME>EmptyConst</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">0</ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="CLOSED">1</ho:UPPER-LIMIT>
+                        <ho:COMPU-CONST><ho:V/></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
+            <fx:CODING ID="Good">
+                <ho:SHORT-NAME>Good</ho:SHORT-NAME>
+                <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE"/>
+                <ho:COMPU-METHODS>
+                <ho:COMPU-METHOD>
+                    <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+                    <ho:COMPU-INTERNAL-TO-PHYS>
+                    <ho:COMPU-SCALES>
+                    <ho:COMPU-SCALE>
+                        <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED"> 0 </ho:LOWER-LIMIT>
+                        <ho:UPPER-LIMIT INTERVAL-TYPE="INFINITE"/>
+                        <ho:COMPU-CONST><ho:V>-INF</ho:V></ho:COMPU-CONST>
+                    </ho:COMPU-SCALE>
+                    </ho:COMPU-SCALES>
+                    </ho:COMPU-INTERNAL-TO-PHYS>
+                </ho:COMPU-METHOD>
+                </ho:COMPU-METHODS>
+            </fx:CODING>
+        </fx:CODINGS>
+    </fx:PROCESSING-INFORMATION>
 </fx:FIBEX>

@@ -64,6 +64,18 @@ impl XmlElement {
         self.children.iter().find(|c| c.name == name)
     }
 
+    /// the parsed text of the child element `name`, None when it is missing
+    /// and an error naming the field when the text is malformed or empty
+    fn child_value<V: FromStr>(&self, name: &str) -> Result<Option<V>, FibexError> {
+        let Some(child) = self.child_by_name(name) else {
+            return Ok(None);
+        };
+        let text = child.text.as_deref().unwrap_or_default();
+        text.parse().map(Some).map_err(|_| {
+            FibexError::new(&format!("malformed {} '{}' in {}", name, text, self.name))
+        })
+    }
+
     /// return the name after the ':' or the full name
     fn non_dotted_name(name: &str) -> &str {
         if let Some(idx) = name.rfind(':') {
@@ -687,6 +699,58 @@ pub enum XsDouble {
     I64(i64),
 }
 
+/// Parses the xs:double lexical form: surrounding XML whitespace, then a decimal
+/// with optional exponent, `INF`, `+INF` or `-INF`. NaN is reported as an error.
+impl FromStr for XsDouble {
+    type Err = FibexError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let text = value.trim_matches([' ', '\t', '\n', '\r']);
+        match text {
+            "INF" | "+INF" => return Ok(XsDouble::F64(f64::INFINITY)),
+            "-INF" => return Ok(XsDouble::F64(f64::NEG_INFINITY)),
+            _ => {}
+        }
+        if !is_xs_double_number(text) {
+            return Err(FibexError::new(&format!("malformed xs:double '{}'", value)));
+        }
+        if !text.contains(['.', 'e', 'E']) {
+            if let Ok(v) = text.parse::<i64>() {
+                return Ok(XsDouble::I64(v));
+            }
+        }
+        text.parse::<f64>()
+            .map(XsDouble::F64)
+            .map_err(|_| FibexError::new(&format!("malformed xs:double '{}'", value)))
+    }
+}
+
+/// `(\+|-)?([0-9]+(\.[0-9]*)?|\.[0-9]+)([Ee](\+|-)?[0-9]+)?` from the xs:double lexical space
+fn is_xs_double_number(text: &str) -> bool {
+    fn digits(t: &str) -> bool {
+        t.bytes().all(|b| b.is_ascii_digit())
+    }
+    fn signed_digits(t: &str) -> bool {
+        let t = t.strip_prefix(['+', '-']).unwrap_or(t);
+        !t.is_empty() && digits(t)
+    }
+    let (mantissa, exponent) = match text.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
+        None => (text, None),
+    };
+    let unsigned = mantissa.strip_prefix(['+', '-']).unwrap_or(mantissa);
+    let mantissa_ok = match unsigned.split_once('.') {
+        Some((int, frac)) => digits(int) && digits(frac) && !(int.is_empty() && frac.is_empty()),
+        None => !unsigned.is_empty() && digits(unsigned),
+    };
+    let exponent_ok = match exponent {
+        Some(exponent) => signed_digits(exponent),
+        None => true,
+    };
+    mantissa_ok && exponent_ok
+}
+
+/// Converts leniently: malformed values become 0. Use `str::parse` to have them reported.
 impl From<&str> for XsDouble {
     fn from(value: &str) -> Self {
         if value.contains('.') {
@@ -732,10 +796,23 @@ impl PartialOrd for XsDouble {
 #[derive(Debug)]
 pub struct IntervalType(pub std::ops::Bound<XsDouble>);
 
-impl From<&XmlElement> for IntervalType {
+impl IntervalType {
     // parse e.g. <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">1048576</ho:LOWER-LIMIT>
-    fn from(xml_e: &XmlElement) -> Self {
-        let v: XsDouble = xml_e.text.as_deref().unwrap_or("0").into();
+    fn from_xml(xml_e: &XmlElement) -> Result<Self, FibexError> {
+        if xml_e
+            .attr("INTERVAL-TYPE")
+            .is_some_and(|a| a.1 == "INFINITE")
+        {
+            return Ok(Self(std::ops::Bound::Unbounded));
+        }
+        let text = xml_e.text.as_deref().unwrap_or_default();
+        let v = text
+            .parse()
+            .map_err(|_| FibexError::new(&format!("malformed {} '{}'", xml_e.name, text)))?;
+        Ok(Self::with_value(xml_e, v))
+    }
+
+    fn with_value(xml_e: &XmlElement, v: XsDouble) -> Self {
         let v2 = v.to_owned(); // bit weird, could be avoided...
         let interval_type = xml_e
             .attr("INTERVAL-TYPE")
@@ -747,6 +824,13 @@ impl From<&XmlElement> for IntervalType {
             })
             .unwrap_or(std::ops::Bound::Included(v2));
         Self(interval_type)
+    }
+}
+
+/// Converts leniently: a malformed limit becomes 0.
+impl From<&XmlElement> for IntervalType {
+    fn from(xml_e: &XmlElement) -> Self {
+        Self::with_value(xml_e, xml_e.text.as_deref().unwrap_or("0").into())
     }
 }
 
@@ -852,22 +936,20 @@ impl FibexData {
         }
     }
 
+    /// the value of a parsed element; an error is reported as a parse warning and the element ignored
+    fn ok_or_warn<V>(&mut self, element: &str, parsed: Result<V, Box<dyn Error>>) -> Option<V> {
+        parsed
+            .map_err(|e| self.add_distinct_warning(format!("ignored {}: {}", element, e)))
+            .ok()
+    }
+
     /// the parsed text of the child element `name` of `parent`.
     /// A malformed or empty value is reported as a parse warning and treated like a missing one.
     fn child_value<V: FromStr>(&mut self, parent: &XmlElement, name: &str) -> Option<V> {
-        let text = parent
-            .child_by_name(name)?
-            .text
-            .as_deref()
-            .unwrap_or_default();
-        let value = text.parse().ok();
-        if value.is_none() {
-            self.add_distinct_warning(format!(
-                "ignored malformed {} '{}' in {}",
-                name, text, parent.name
-            ));
-        }
-        value
+        parent.child_value(name).unwrap_or_else(|e| {
+            self.add_distinct_warning(format!("ignored {}", e));
+            None
+        })
     }
 
     fn parse_fibex<T: BufRead>(
@@ -2210,11 +2292,10 @@ impl FibexData {
                     b"ENUMERATION-ELEMENTS" => {} // skip, we parse the ENUM-ELEMENT here
                     b"ENUM-ELEMENT" => {
                         let r = read_element(e, reader, false)?;
-                        let v = r.child_by_name("VALUE").and_then(|c| c.text.to_owned());
-                        if let Some(v) = v {
+                        if let Some(value) = self.child_value::<i128>(&r, "VALUE") {
                             let s = r.child_by_name("SYNONYM").and_then(|c| c.text.to_owned());
                             enums.push(Enum {
-                                value: v.parse::<i128>().unwrap_or(0),
+                                value,
                                 synonym: s,
                                 desc: None,
                             });
@@ -2379,23 +2460,25 @@ impl FibexData {
         let id = xml_e
             .attr("ID")
             .ok_or_else(|| FibexError::new("ID missing for coding"))?;
+        let coded_type = xml_e
+            .child_by_name("CODED-TYPE")
+            .and_then(|c| self.ok_or_warn("CODED-TYPE", CodedType::from_xml(c)));
+        let compu_methods = xml_e
+            .child_by_name("COMPU-METHODS")
+            .map(|ms| {
+                ms.children
+                    .iter()
+                    .filter_map(|m| self.ok_or_warn("COMPU-METHOD", CompuMethod::from_xml(m)))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let cod = Coding {
             id: id.1.to_owned(),
             short_name: xml_e
                 .child_by_name("SHORT-NAME")
                 .and_then(|c| c.text.to_owned()),
-            coded_type: xml_e
-                .child_by_name("CODED-TYPE")
-                .and_then(|c| CodedType::from_xml(c).ok()), // todo dont discard the error!
-            compu_methods: xml_e
-                .child_by_name("COMPU-METHODS")
-                .map(|ms| {
-                    ms.children
-                        .iter()
-                        .filter_map(|m| CompuMethod::from_xml(m).ok())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default(),
+            coded_type,
+            compu_methods,
         };
 
         Ok(cod)
@@ -2430,9 +2513,10 @@ impl CompuMethod {
             .map(|s| {
                 s.children
                     .iter()
-                    .filter_map(|s| CompuScale::from_xml(s).ok())
-                    .collect::<Vec<_>>()
+                    .map(CompuScale::from_xml)
+                    .collect::<Result<Vec<_>, _>>()
             })
+            .transpose()?
             .unwrap_or_default();
 
         Ok(CompuMethod {
@@ -2446,8 +2530,12 @@ impl CompuScale {
     fn from_xml(xml_e: &XmlElement) -> Result<CompuScale, Box<dyn Error>> {
         let mask = xml_e
             .child_by_name("MASK")
-            .and_then(|m| m.text.as_deref())
-            .and_then(|t| u64::from_str_radix(t, 2).ok());
+            .map(|m| m.text.as_deref().unwrap_or_default())
+            .map(|t| {
+                u64::from_str_radix(t, 2)
+                    .map_err(|_| FibexError::new(&format!("malformed MASK '{}'", t)))
+            })
+            .transpose()?;
         let compu_const = xml_e
             .child_by_name("COMPU-CONST")
             .and_then(|c| {
@@ -2458,15 +2546,22 @@ impl CompuScale {
                 }
             })
             .map(|c| (c.name.as_str(), c.text.as_deref().unwrap_or_default()))
-            .and_then(|(name, text)| match name {
-                "V" => Some(VvT::V(text.into())),
-                //"V" =>  text.parse::<f64>().ok().map(|v|VvT::V(v)),
-                "VT" => Some(VvT::VT(text.to_owned())),
-                _ => None,
-            });
+            .map(|(name, text)| match name {
+                "V" => text.parse().map(|v| Some(VvT::V(v))),
+                "VT" => Ok(Some(VvT::VT(text.to_owned()))),
+                _ => Ok(None),
+            })
+            .transpose()?
+            .flatten();
         // <ho:LOWER-LIMIT INTERVAL-TYPE="CLOSED">1048576</ho:LOWER-LIMIT>
-        let lower_limit = xml_e.child_by_name("LOWER-LIMIT").map(IntervalType::from);
-        let upper_limit = xml_e.child_by_name("UPPER-LIMIT").map(IntervalType::from);
+        let lower_limit = xml_e
+            .child_by_name("LOWER-LIMIT")
+            .map(IntervalType::from_xml)
+            .transpose()?;
+        let upper_limit = xml_e
+            .child_by_name("UPPER-LIMIT")
+            .map(IntervalType::from_xml)
+            .transpose()?;
 
         Ok(CompuScale {
             mask,
@@ -2570,15 +2665,9 @@ impl CodedType {
             None
         };
 
-        let bit_length = xml_e
-            .child_by_name("BIT-LENGTH")
-            .and_then(|bl| bl.text.as_ref().and_then(|bl| bl.parse::<u32>().ok()));
-        let min_length = xml_e
-            .child_by_name("MIN-LENGTH")
-            .and_then(|bl| bl.text.as_ref().and_then(|bl| bl.parse::<u32>().ok()));
-        let max_length = xml_e
-            .child_by_name("MAX-LENGTH")
-            .and_then(|bl| bl.text.as_ref().and_then(|bl| bl.parse::<u32>().ok()));
+        let bit_length = xml_e.child_value("BIT-LENGTH")?;
+        let min_length = xml_e.child_value("MIN-LENGTH")?;
+        let max_length = xml_e.child_value("MAX-LENGTH")?;
 
         Ok(CodedType {
             base_data_type,
@@ -2657,6 +2746,37 @@ mod tests {
             }
         };
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_xs_double() {
+        let accepted = [
+            ("42", XsDouble::I64(42)),
+            ("+42", XsDouble::I64(42)),
+            ("-0", XsDouble::I64(0)),
+            (" \t\n42\r\n", XsDouble::I64(42)),
+            ("-1.5", XsDouble::F64(-1.5)),
+            ("1.", XsDouble::F64(1.0)),
+            (".5", XsDouble::F64(0.5)),
+            ("-.5", XsDouble::F64(-0.5)),
+            ("1e3", XsDouble::F64(1000.0)),
+            ("1E+3", XsDouble::F64(1000.0)),
+            ("2.5e-1", XsDouble::F64(0.25)),
+            ("99999999999999999999", XsDouble::F64(1e20)),
+            ("INF", XsDouble::F64(f64::INFINITY)),
+            ("+INF", XsDouble::F64(f64::INFINITY)),
+            (" -INF ", XsDouble::F64(f64::NEG_INFINITY)),
+        ];
+        for (text, value) in accepted {
+            assert_eq!(text.parse::<XsDouble>().ok(), Some(value), "{text:?}");
+        }
+        let rejected = [
+            "", " ", "low", ".", "+", "-", "e3", "1e", "1e+", ".e1", "1.2.3", "1e2e3", "1 2",
+            "1_000", "0x10", "inf", "-inf", "infinity", "Infinity", "+Inf", "nan", "NaN",
+        ];
+        for text in rejected {
+            assert!(text.parse::<XsDouble>().is_err(), "{text:?}");
+        }
     }
 
     #[test]
@@ -2796,8 +2916,51 @@ mod tests {
             vec![
                 "ignored malformed MINIMUM-SIZE 'not-a-number' in ARRAY-DIMENSION",
                 "ignored malformed BIT-ALIGNMENT '' in ARRAY-DIMENSION",
+                "ignored malformed VALUE 'one' in ENUM-ELEMENT",
+                "ignored malformed VALUE '' in ENUM-ELEMENT",
+                "ignored CODED-TYPE: malformed BIT-LENGTH 'eight' in CODED-TYPE",
+                "ignored CODED-TYPE: malformed BIT-LENGTH '' in CODED-TYPE",
+                "ignored CODED-TYPE: malformed MIN-LENGTH 'short' in CODED-TYPE",
+                "ignored CODED-TYPE: malformed MAX-LENGTH '' in CODED-TYPE",
+                "ignored COMPU-METHOD: malformed LOWER-LIMIT 'low'",
+                "ignored COMPU-METHOD: malformed LOWER-LIMIT ''",
+                "ignored COMPU-METHOD: malformed MASK '12'",
+                "ignored COMPU-METHOD: malformed MASK ''",
+                "ignored COMPU-METHOD: malformed xs:double 'inf'",
+                "ignored COMPU-METHOD: malformed xs:double ''",
             ]
         );
+        for id in [
+            "BadBitLength",
+            "EmptyBitLength",
+            "BadMinLength",
+            "EmptyMaxLength",
+        ] {
+            assert!(fb.pi.codings[id].coded_type.is_none(), "{id}");
+        }
+        for id in [
+            "BadLimit",
+            "EmptyLimit",
+            "BadMask",
+            "EmptyMask",
+            "BadConst",
+            "EmptyConst",
+        ] {
+            assert!(fb.pi.codings[id].compu_methods.is_empty(), "{id}");
+        }
+        let good = &fb.pi.codings["Good"].compu_methods[0].internal_to_phys_scales[0];
+        assert!(matches!(
+            good.upper_limit,
+            Some(IntervalType(std::ops::Bound::Unbounded))
+        ));
+
+        let DatatypeType::EnumType { enums, .. } =
+            &fb.elements.datatypes_map_by_id["Enum"].datatype
+        else {
+            panic!("expected an enum datatype")
+        };
+        assert_eq!(enums.len(), 1);
+        assert_eq!(enums[0].value, 2);
 
         let dt = &fb
             .elements
