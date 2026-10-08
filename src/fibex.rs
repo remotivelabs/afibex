@@ -87,18 +87,12 @@ fn read_element<T: BufRead>(
         text: None,
     };
 
-    let attrs = start_e.attributes().flatten().map(|attribute| {
-        (
-            String::from_utf8(attribute.key.to_vec()),
-            String::from_utf8(attribute.value.to_vec()),
-        )
-    });
-    for attr in attrs {
-        if attr.0.is_ok() && attr.1.is_ok() {
-            xml_e.attributes.push((attr.0.unwrap(), attr.1.unwrap()));
-        } else {
-            println!("read_element: wrong attributes for '{}'", xml_e.name);
-        }
+    for attribute in start_e.attributes() {
+        let attribute = attribute?;
+        xml_e.attributes.push((
+            String::from_utf8(attribute.key.to_vec())?,
+            String::from_utf8(attribute.value.to_vec())?,
+        ));
     }
 
     let mut buf = Vec::with_capacity(1024); // todo better default?
@@ -2710,6 +2704,19 @@ pub fn get_all_fibex_in_dir(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_element_rejects_attribute_with_invalid_utf8() {
+        let xml = b"<a ID=\"\xff\"></a>";
+        let mut reader = Reader::from_reader(&xml[..]);
+        let mut buf = Vec::new();
+        let result = loop {
+            if let Event::Start(ref e) = reader.read_event(&mut buf).unwrap() {
+                break read_element(e, &mut reader, false);
+            }
+        };
+        assert!(result.is_err());
+    }
 
     #[test]
     fn non_dotted_name() {
