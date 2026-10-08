@@ -14,6 +14,7 @@ use std::{
     fmt,
     io::BufRead,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -851,6 +852,24 @@ impl FibexData {
         }
     }
 
+    /// the parsed text of the child element `name` of `parent`.
+    /// A malformed or empty value is reported as a parse warning and treated like a missing one.
+    fn child_value<V: FromStr>(&mut self, parent: &XmlElement, name: &str) -> Option<V> {
+        let text = parent
+            .child_by_name(name)?
+            .text
+            .as_deref()
+            .unwrap_or_default();
+        let value = text.parse().ok();
+        if value.is_none() {
+            self.add_distinct_warning(format!(
+                "ignored malformed {} '{}' in {}",
+                name, text, parent.name
+            ));
+        }
+        value
+    }
+
     fn parse_fibex<T: BufRead>(
         &mut self,
         fibex: &quick_xml::events::BytesStart,
@@ -1144,11 +1163,9 @@ impl FibexData {
                     b"FRAME-TRIGGERING" => {
                         // for now we dont read the full element but just the IDENTIFIER / FRAME-REF mapping
                         let ft = read_element(e, reader, false)?;
-                        let identifier = ft
-                            .child_by_name("IDENTIFIER")
-                            .and_then(|identifier| identifier.child_by_name("IDENTIFIER-VALUE"))
-                            .and_then(|value| value.text.as_ref())
-                            .and_then(|text| text.parse::<u32>().ok());
+                        let identifier = ft.child_by_name("IDENTIFIER").and_then(|identifier| {
+                            self.child_value::<u32>(identifier, "IDENTIFIER-VALUE")
+                        });
                         if let Some(identifier) = identifier {
                             if identifier > 0 {
                                 let frame_ref = ft
@@ -1352,10 +1369,8 @@ impl FibexData {
                             .ok_or_else(|| {
                                 FibexError::new("pdu_ref missing in FRAME/PDU-INSTACNE")
                             })?;
-                        let sequence_nr = pdu_i
-                            .child_by_name("SEQUENCE-NUMBER")
-                            .and_then(|e| e.text.as_ref())
-                            .and_then(|e| e.parse::<u32>().ok())
+                        let sequence_nr = self
+                            .child_value::<u32>(&pdu_i, "SEQUENCE-NUMBER")
                             .or(Some(pdu_instances.len() as u32)) // assert BIT-POSITION?
                             .ok_or_else(|| FibexError {
                                 msg: format!(
@@ -1364,14 +1379,9 @@ impl FibexData {
                                 ),
                             })?;
 
-                        let bit_position = pdu_i
-                            .child_by_name("BIT-POSITION")
-                            .and_then(|e| e.text.as_ref())
-                            .and_then(|e| e.parse::<u32>().ok());
-                        let is_high_low_byte_order = pdu_i
-                            .child_by_name("IS-HIGH-LOW-BYTE-ORDER")
-                            .and_then(|e| e.text.as_deref())
-                            .and_then(|t| t.parse::<bool>().ok()); // todo handle errors? (instead of ok!)
+                        let bit_position = self.child_value::<u32>(&pdu_i, "BIT-POSITION");
+                        let is_high_low_byte_order =
+                            self.child_value::<bool>(&pdu_i, "IS-HIGH-LOW-BYTE-ORDER");
                         if pdu_instances.len() as u32 != sequence_nr {
                             return Err(FibexError {
                                 msg: format!(
@@ -1553,10 +1563,8 @@ impl FibexData {
                             .ok_or_else(|| {
                                 FibexError::new("SIGNAL-REF missing in FRAME/SIGNAL-INSTACNE")
                             })?;
-                        let sequence_nr = pdu_i
-                            .child_by_name("SEQUENCE-NUMBER")
-                            .and_then(|e| e.text.as_ref())
-                            .and_then(|e| e.parse::<u32>().ok())
+                        let sequence_nr = self
+                            .child_value::<u32>(&pdu_i, "SEQUENCE-NUMBER")
                             .or(Some(signal_instances.len() as u32)) // assert a BIT-POSITION then?
                             .ok_or_else(|| FibexError {
                                 msg: format!(
@@ -1564,14 +1572,9 @@ impl FibexData {
                                     short_name
                                 ),
                             })?;
-                        let bit_position = pdu_i
-                            .child_by_name("BIT-POSITION")
-                            .and_then(|e| e.text.as_ref())
-                            .and_then(|e| e.parse::<u32>().ok());
-                        let is_high_low_byte_order = pdu_i
-                            .child_by_name("IS-HIGH-LOW-BYTE-ORDER")
-                            .and_then(|e| e.text.as_deref())
-                            .and_then(|t| t.parse::<bool>().ok());
+                        let bit_position = self.child_value::<u32>(&pdu_i, "BIT-POSITION");
+                        let is_high_low_byte_order =
+                            self.child_value::<bool>(&pdu_i, "IS-HIGH-LOW-BYTE-ORDER");
                         if signal_instances.len() as u32 != sequence_nr {
                             return Err(FibexError {
                                 msg: format!(
@@ -1652,18 +1655,10 @@ impl FibexData {
                         let short_name = xml_e
                             .child_by_name("SHORT-NAME")
                             .and_then(|c| c.text.to_owned());
-                        let bit_position = xml_e
-                            .child_by_name("BIT-POSITION")
-                            .and_then(|e| e.text.as_ref())
-                            .and_then(|e| e.parse::<u32>().ok());
-                        let bit_length = xml_e
-                            .child_by_name("BIT-LENGTH")
-                            .and_then(|e| e.text.as_ref())
-                            .and_then(|e| e.parse::<u32>().ok());
-                        let is_high_low_byte_order = xml_e
-                            .child_by_name("IS-HIGH-LOW-BYTE-ORDER")
-                            .and_then(|e| e.text.as_deref())
-                            .and_then(|t| t.parse::<bool>().ok());
+                        let bit_position = self.child_value::<u32>(&xml_e, "BIT-POSITION");
+                        let bit_length = self.child_value::<u32>(&xml_e, "BIT-LENGTH");
+                        let is_high_low_byte_order =
+                            self.child_value::<bool>(&xml_e, "IS-HIGH-LOW-BYTE-ORDER");
                         if let Some(bit_position) = bit_position {
                             if let Some(is_high_low_byte_order) = is_high_low_byte_order {
                                 if let Some(bit_length) = bit_length {
@@ -1689,18 +1684,10 @@ impl FibexData {
                             .child_by_name("SEGMENT-POSITIONS")
                             .and_then(|e| e.child_by_name("SEGMENT-POSITION"))
                             .and_then(|e| {
-                                let bit_position = e
-                                    .child_by_name("BIT-POSITION")
-                                    .and_then(|e| e.text.as_ref())
-                                    .and_then(|e| e.parse::<u32>().ok());
-                                let is_high_low_byte_order = e
-                                    .child_by_name("IS-HIGH-LOW-BYTE-ORDER")
-                                    .and_then(|e| e.text.as_deref())
-                                    .and_then(|t| t.parse::<bool>().ok());
-                                let bit_length = e
-                                    .child_by_name("BIT-LENGTH")
-                                    .and_then(|e| e.text.as_ref())
-                                    .and_then(|e| e.parse::<u32>().ok());
+                                let bit_position = self.child_value::<u32>(e, "BIT-POSITION");
+                                let is_high_low_byte_order =
+                                    self.child_value::<bool>(e, "IS-HIGH-LOW-BYTE-ORDER");
+                                let bit_length = self.child_value::<u32>(e, "BIT-LENGTH");
                                 if let Some(bit_position) = bit_position {
                                     if let Some(is_high_low_byte_order) = is_high_low_byte_order {
                                         if let Some(bit_length) = bit_length {
@@ -1721,18 +1708,10 @@ impl FibexData {
                                     .child_by_name("PDU-REF")
                                     .and_then(|e| e.attr("ID-REF"))
                                     .map(|a| a.1.to_owned());
-                                let bit_position = pdu_i
-                                    .child_by_name("BIT-POSITION")
-                                    .and_then(|e| e.text.as_ref())
-                                    .and_then(|e| e.parse::<u32>().ok());
-                                let is_high_low_byte_order = pdu_i
-                                    .child_by_name("IS-HIGH-LOW-BYTE-ORDER")
-                                    .and_then(|e| e.text.as_deref())
-                                    .and_then(|t| t.parse::<bool>().ok()); // todo handle errors? (instead of ok!)
-                                let switch_code = pdu_i
-                                    .child_by_name("SWITCH-CODE")
-                                    .and_then(|e| e.text.as_ref())
-                                    .and_then(|e| e.parse::<u64>().ok());
+                                let bit_position = self.child_value::<u32>(pdu_i, "BIT-POSITION");
+                                let is_high_low_byte_order =
+                                    self.child_value::<bool>(pdu_i, "IS-HIGH-LOW-BYTE-ORDER");
+                                let switch_code = self.child_value::<u64>(pdu_i, "SWITCH-CODE");
                                 if let Some(switch_code) = switch_code {
                                     if let Some(pdu_ref) = pdu_ref {
                                         pdu_instances_switch_map.insert(
@@ -2042,45 +2021,23 @@ impl FibexData {
                                 .child_by_name("CODING-REF")
                                 .and_then(|e| e.attr("ID-REF"))
                                 .map(|a| a.1.to_owned()),
-                            bit_length: ut
-                                .child_by_name("BIT-LENGTH")
-                                .and_then(|e| e.text.as_deref())
-                                .and_then(|t| t.parse::<u32>().ok()),
-                            min_bit_length: ut
-                                .child_by_name("MIN-BIT-LENGTH")
-                                .and_then(|e| e.text.as_deref())
-                                .and_then(|t| t.parse::<u32>().ok()),
-                            max_bit_length: ut
-                                .child_by_name("MAX-BIT-LENGTH")
-                                .and_then(|e| e.text.as_deref())
-                                .and_then(|t| t.parse::<u32>().ok()),
-                            is_high_low_byte_order: ut
-                                .child_by_name("IS-HIGH-LOW-BYTE-ORDER")
-                                .and_then(|e| e.text.as_deref())
-                                .and_then(|t| t.parse::<bool>().ok()), // todo handle errors? (instead of ok!)
+                            bit_length: self.child_value::<u32>(&ut, "BIT-LENGTH"),
+                            min_bit_length: self.child_value::<u32>(&ut, "MIN-BIT-LENGTH"),
+                            max_bit_length: self.child_value::<u32>(&ut, "MAX-BIT-LENGTH"),
+                            is_high_low_byte_order: self
+                                .child_value::<bool>(&ut, "IS-HIGH-LOW-BYTE-ORDER"),
                             serialization_attributes: {
                                 ut.child_by_name("SERIALIZATION-ATTRIBUTES").map(|sa| {
                                     SerializationAttributes {
-                                        length_field_size: sa
-                                            .child_by_name("LENGTH-FIELD-SIZE")
-                                            .and_then(|e| e.text.as_deref())
-                                            .and_then(|t| t.parse::<u32>().ok()),
-                                        type_field_size: sa
-                                            .child_by_name("TYPE-FIELD-SIZE")
-                                            .and_then(|e| e.text.as_deref())
-                                            .and_then(|t| t.parse::<u32>().ok()),
-                                        bit_alignment: sa
-                                            .child_by_name("BIT-ALIGNMENT")
-                                            .and_then(|e| e.text.as_deref())
-                                            .and_then(|t| t.parse::<u32>().ok()),
-                                        array_length_field_size: sa
-                                            .child_by_name("ARRAY-LENGTH-FIELD-SIZE")
-                                            .and_then(|e| e.text.as_deref())
-                                            .and_then(|t| t.parse::<u32>().ok()),
-                                        pass_on_to_subelements: sa
-                                            .child_by_name("PASS-ON-TO-SUBELEMENTS")
-                                            .and_then(|e| e.text.as_deref())
-                                            .and_then(|t| t.parse::<bool>().ok()),
+                                        length_field_size: self
+                                            .child_value::<u32>(sa, "LENGTH-FIELD-SIZE"),
+                                        type_field_size: self
+                                            .child_value::<u32>(sa, "TYPE-FIELD-SIZE"),
+                                        bit_alignment: self.child_value::<u32>(sa, "BIT-ALIGNMENT"),
+                                        array_length_field_size: self
+                                            .child_value::<u32>(sa, "ARRAY-LENGTH-FIELD-SIZE"),
+                                        pass_on_to_subelements: self
+                                            .child_value::<bool>(sa, "PASS-ON-TO-SUBELEMENTS"),
                                     }
                                 })
                             },
@@ -2090,16 +2047,9 @@ impl FibexData {
                         // to support FIELDs
                         // todo change into own method
                         let xe = read_element(e, reader, false)?;
-                        let mid = xe
-                            .child_by_name("METHOD-IDENTIFIER")
-                            .or_else(|| xe.child_by_name("NOTIFICATION-IDENTIFIER"))
-                            .and_then(|e| {
-                                if let Some(text) = &e.text {
-                                    text.parse::<u16>().ok()
-                                } else {
-                                    None
-                                }
-                            })
+                        let mid = self
+                            .child_value::<u16>(&xe, "METHOD-IDENTIFIER")
+                            .or_else(|| self.child_value::<u16>(&xe, "NOTIFICATION-IDENTIFIER"))
                             .ok_or_else(|| FibexError {
                                 msg: format!("METHOD-IDENTIFIER missing in FIELD {}", id),
                             })?;
@@ -2130,18 +2080,9 @@ impl FibexData {
                                         })
                                     })?
                                     .parse::<u32>()?,
-                                minimum_size: ad
-                                    .child_by_name("MINIMUM-SIZE")
-                                    .and_then(|e| e.text.as_deref())
-                                    .and_then(|t| t.parse::<u32>().ok()),
-                                maximum_size: ad
-                                    .child_by_name("MAXIMUM-SIZE")
-                                    .and_then(|e| e.text.as_deref())
-                                    .and_then(|t| t.parse::<u32>().ok()),
-                                bit_alignment: ad
-                                    .child_by_name("BIT-ALIGNMENT")
-                                    .and_then(|e| e.text.as_deref())
-                                    .and_then(|t| t.parse::<u32>().ok()),
+                                minimum_size: self.child_value::<u32>(&ad, "MINIMUM-SIZE"),
+                                maximum_size: self.child_value::<u32>(&ad, "MAXIMUM-SIZE"),
+                                bit_alignment: self.child_value::<u32>(&ad, "BIT-ALIGNMENT"),
                             });
                         } else {
                             return Err(Box::new(FibexError {
@@ -2843,6 +2784,34 @@ mod tests {
         assert_eq!(call_semantic(2), None);
         assert_eq!(call_semantic(3), Some(CallSemantic::RequestResponse));
         assert_eq!(call_semantic(32769), Some(CallSemantic::FireAndForget));
+    }
+
+    #[test]
+    fn load_warns_about_malformed_values() {
+        let mut fb = FibexData::new();
+        let r = fb.load_fibex_file(Path::new("tests/fibex_malformed_values.xml"));
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert_eq!(
+            fb.parse_warnings,
+            vec![
+                "ignored malformed MINIMUM-SIZE 'not-a-number' in ARRAY-DIMENSION",
+                "ignored malformed BIT-ALIGNMENT '' in ARRAY-DIMENSION",
+            ]
+        );
+
+        let dt = &fb
+            .elements
+            .datatypes_map_by_id
+            .get("Struct")
+            .unwrap()
+            .datatype;
+        let DatatypeType::ComplexType(cdt) = dt else {
+            panic!("expected a complex datatype")
+        };
+        let dimension = &cdt.members[0].array_dimensions[0];
+        assert_eq!(dimension.minimum_size, None);
+        assert_eq!(dimension.maximum_size, Some(8));
+        assert_eq!(dimension.bit_alignment, None);
     }
 
     #[test]
