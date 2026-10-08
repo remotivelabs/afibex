@@ -74,11 +74,57 @@ impl XmlElement {
     }
 }
 
+/// how deep elements may nest below an element we read or skip.
+/// Bounds the recursion in read_element, so a crafted file cannot overflow the stack.
+const MAX_NESTING_DEPTH: u32 = 256;
+
+/// A file nesting elements deeper than MAX_NESTING_DEPTH. Loading fails with it:
+/// unlike other parse errors it is never turned into a warning, as the reader
+/// stopped inside the element and cannot resume.
+#[derive(Debug)]
+pub struct NestingTooDeep {
+    pub element: String,
+}
+
+impl fmt::Display for NestingTooDeep {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "'{}' nests deeper than {} elements",
+            self.element, MAX_NESTING_DEPTH
+        )
+    }
+}
+
+impl Error for NestingTooDeep {}
+
+fn nesting_too_deep(name: &[u8]) -> Box<dyn Error> {
+    Box::new(NestingTooDeep {
+        element: String::from_utf8_lossy(name).into_owned(),
+    })
+}
+
+fn is_nesting_too_deep(err: &(dyn Error + 'static)) -> bool {
+    err.is::<NestingTooDeep>()
+}
+
 fn read_element<T: BufRead>(
     start_e: &quick_xml::events::BytesStart,
     reader: &mut Reader<T>,
     empty_element: bool,
 ) -> Result<XmlElement, Box<dyn Error>> {
+    read_nested_element(start_e, reader, empty_element, 0)
+}
+
+fn read_nested_element<T: BufRead>(
+    start_e: &quick_xml::events::BytesStart,
+    reader: &mut Reader<T>,
+    empty_element: bool,
+    depth: u32,
+) -> Result<XmlElement, Box<dyn Error>> {
+    if depth > MAX_NESTING_DEPTH {
+        return Err(nesting_too_deep(start_e.local_name()));
+    }
     let mut xml_e = XmlElement {
         // buf: Vec::new(), if we ever want to return Cow... references into
         name: String::from_utf8(start_e.local_name().to_vec())?,
@@ -105,8 +151,16 @@ fn read_element<T: BufRead>(
     if !empty_element {
         loop {
             match reader.read_event(&mut buf)? {
-                Event::Start(ref e) => xml_e.children.push(read_element(e, reader, false)?),
-                Event::Empty(ref e) => xml_e.children.push(read_element(e, reader, true)?),
+                Event::Start(ref e) => {
+                    xml_e
+                        .children
+                        .push(read_nested_element(e, reader, false, depth + 1)?)
+                }
+                Event::Empty(ref e) => {
+                    xml_e
+                        .children
+                        .push(read_nested_element(e, reader, true, depth + 1)?)
+                }
                 Event::Text(ref e) => {
                     // this text gets updated on each text (incl. whitespace) within the start/end tag
                     let mut text = e.unescape_and_decode(reader)?;
@@ -133,7 +187,12 @@ fn skip_element<T: BufRead>(
 
     loop {
         match reader.read_event(&mut buf)? {
-            Event::Start(ref _e) => nesting_level += 1,
+            Event::Start(ref _e) => {
+                if nesting_level == MAX_NESTING_DEPTH {
+                    return Err(nesting_too_deep(start_e.local_name()));
+                }
+                nesting_level += 1
+            }
             // can be ignored Event::Empty(ref e) => skip_element(e, reader, true)?,
             Event::End(ref e) => {
                 if e.local_name() == start_e.local_name() && nesting_level == 0 {
@@ -945,30 +1004,32 @@ impl FibexData {
         let mut buf = Vec::new();
         loop {
             match reader.read_event(&mut buf)? {
-                Event::Start(ref e) => match e.local_name() {
-                    b"SERVICE-INTERFACE" => {
-                        match self.parse_service_interface(e, reader){
-                            Ok(si)=>{
-                                let key = (si.service_identifier.unwrap_or_default(), si.api_version.0);
+                Event::Start(ref e) => {
+                    match e.local_name() {
+                        b"SERVICE-INTERFACE" => match self.parse_service_interface(e, reader) {
+                            Ok(si) => {
+                                let key =
+                                    (si.service_identifier.unwrap_or_default(), si.api_version.0);
                                 self.elements
                                     .services_map_by_sid_major
                                     .entry(key)
                                     .or_default()
-                                    .push(si);        
+                                    .push(si);
                             }
-                            Err(e)=>{
+                            Err(e) if is_nesting_too_deep(&*e) => return Err(e),
+                            Err(e) => {
                                 self.add_distinct_warning(format!("parse_service_interfaces: failed to parse service_interface: {}", e));
-                            }           
+                            }
+                        },
+                        _ => {
+                            self.add_distinct_warning(format!(
+                                "parse_service_interfaces: unprocessed Event::Start of '{}'",
+                                String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
+                            ));
+                            skip_element(e, reader)?;
                         }
                     }
-                    _ => {
-                        self.add_distinct_warning(format!(
-                            "parse_service_interfaces: unprocessed Event::Start of '{}'",
-                            String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
-                        ));
-                        skip_element(e, reader)?;
-                    }
-                },
+                }
                 Event::Empty(ref e) => self.add_distinct_warning(format!(
                     "parse_service_interface: Event::Empty of unknown '{}'",
                     String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
@@ -1063,6 +1124,7 @@ impl FibexData {
                     b"EVENT-GROUPS" => {} // we ignore to get the EVENT-GROUP events
                     b"EVENT-GROUP" => match self.parse_event_group(e, reader) {
                         Ok(event_group) => event_groups.push(event_group),
+                        Err(err) if is_nesting_too_deep(&*err) => return Err(err),
                         Err(err) => {
                             self.add_distinct_warning(format!(
                                 "parse_service_interface: Ignoring event group due to Err '{}'",
@@ -1824,18 +1886,17 @@ impl FibexData {
                     }
                     b"INPUT-PARAMETERS" | b"RETURN-PARAMETERS" => {} // ignore, we parse the parameters directly
                     b"INPUT-PARAMETER" | b"RETURN-PARAMETER" => {
-                        let param = self.parse_parameter(e, reader, false);
-                        if let Ok(param) = param {
-                            match e.local_name() {
+                        match self.parse_parameter(e, reader, false) {
+                            Ok(param) => match e.local_name() {
                                 b"INPUT-PARAMETER" => &mut input_params,
                                 _ => &mut return_params,
                             }
-                            .push(param);
-                        } else {
-                            self.add_distinct_warning(format!(
+                            .push(param),
+                            Err(err) if is_nesting_too_deep(&*err) => return Err(err),
+                            Err(err) => self.add_distinct_warning(format!(
                                 "parse_method: Ignoring parameter due to Err '{}'",
-                                param.unwrap_err()
-                            ));
+                                err
+                            )),
                         }
                         //let key = method.method_identifier.unwrap_or_default();
                         //methods_by_mid.insert(key, method); // todo ignore duplicates?
@@ -2263,6 +2324,7 @@ impl FibexData {
                     b"MEMBERS" => {} // ignore we parse MEMBER directly
                     b"MEMBER" => match self.parse_parameter(e, reader, false) {
                         Ok(param) => members.push(param),
+                        Err(e) if is_nesting_too_deep(&*e) => return Err(e),
                         Err(e) => {
                             // e.g. if DATATYPE-REF is missing/empty (some faulty fibex generators)
                             self.add_distinct_warning(format!(
@@ -2683,6 +2745,109 @@ pub fn get_all_fibex_in_dir(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>,
 mod tests {
     use super::*;
 
+    fn nested_xml(depth: usize) -> String {
+        format!("{}{}", "<a>".repeat(depth), "</a>".repeat(depth))
+    }
+
+    fn read_root(xml: &str) -> Result<XmlElement, Box<dyn Error>> {
+        let mut reader = Reader::from_str(xml);
+        let mut buf = Vec::new();
+        loop {
+            if let Event::Start(ref e) = reader.read_event(&mut buf)? {
+                return read_element(e, &mut reader, false);
+            }
+        }
+    }
+
+    fn skip_root(xml: &str) -> Result<(), Box<dyn Error>> {
+        let mut reader = Reader::from_str(xml);
+        let mut buf = Vec::new();
+        loop {
+            if let Event::Start(ref e) = reader.read_event(&mut buf)? {
+                return skip_element(e, &mut reader);
+            }
+        }
+    }
+
+    #[test]
+    fn read_element_accepts_max_nesting_depth() {
+        assert!(read_root(&nested_xml(MAX_NESTING_DEPTH as usize + 1)).is_ok());
+    }
+
+    #[test]
+    fn read_element_rejects_deeper_nesting() {
+        let err = read_root(&nested_xml(100_000)).unwrap_err();
+        assert!(err.to_string().contains("nests deeper"), "{err}");
+    }
+
+    #[test]
+    fn skip_element_accepts_max_nesting_depth() {
+        assert!(skip_root(&nested_xml(MAX_NESTING_DEPTH as usize + 1)).is_ok());
+    }
+
+    #[test]
+    fn skip_element_rejects_deeper_nesting() {
+        let err = skip_root(&nested_xml(MAX_NESTING_DEPTH as usize + 2)).unwrap_err();
+        assert!(err.to_string().contains("nests deeper"), "{err}");
+    }
+
+    fn load_with_deep_nesting(name: &str, elements: &str) -> Result<(), Box<dyn Error>> {
+        let deep = nested_xml(MAX_NESTING_DEPTH as usize + 1);
+        let xml = format!(
+            r#"<FIBEX><PROJECT ID="p"/><ELEMENTS>{}</ELEMENTS></FIBEX>"#,
+            elements.replace("DEEP", &deep)
+        );
+        let path = std::env::temp_dir().join(format!("afibex_{}_{}.xml", name, std::process::id()));
+        std::fs::write(&path, xml)?;
+        let r = FibexData::new().load_fibex_file(&path);
+        std::fs::remove_file(&path)?;
+        r
+    }
+
+    fn assert_nesting_too_deep(r: Result<(), Box<dyn Error>>) {
+        let err = r.unwrap_err();
+        assert!(is_nesting_too_deep(&*err), "{err}");
+    }
+
+    #[test]
+    fn load_rejects_deep_nesting_in_field() {
+        assert_nesting_too_deep(load_with_deep_nesting(
+            "field",
+            r#"<SERVICE-INTERFACES><SERVICE-INTERFACE ID="s"><FIELDS><FIELD ID="f">
+            <UTILIZATION>DEEP</UTILIZATION></FIELD></FIELDS></SERVICE-INTERFACE></SERVICE-INTERFACES>"#,
+        ));
+    }
+
+    #[test]
+    fn load_rejects_deep_nesting_in_member() {
+        assert_nesting_too_deep(load_with_deep_nesting(
+            "member",
+            r#"<DATATYPES><DATATYPE ID="d"><MEMBERS><MEMBER ID="m">
+            <UTILIZATION>DEEP</UTILIZATION></MEMBER></MEMBERS></DATATYPE></DATATYPES>"#,
+        ));
+    }
+
+    #[test]
+    fn load_rejects_deep_nesting_in_parameter() {
+        assert_nesting_too_deep(load_with_deep_nesting(
+            "parameter",
+            r#"<SERVICE-INTERFACES><SERVICE-INTERFACE ID="s"><METHODS><METHOD ID="m">
+            <INPUT-PARAMETERS><INPUT-PARAMETER ID="i"><UTILIZATION>DEEP</UTILIZATION>
+            </INPUT-PARAMETER></INPUT-PARAMETERS></METHOD></METHODS></SERVICE-INTERFACE>
+            </SERVICE-INTERFACES>"#,
+        ));
+    }
+
+    #[test]
+    fn load_rejects_deep_nesting_in_event_group() {
+        assert_nesting_too_deep(load_with_deep_nesting(
+            "event_group",
+            r#"<SERVICE-INTERFACES><SERVICE-INTERFACE ID="s"><EVENT-GROUPS><EVENT-GROUP ID="g">
+            <MANUFACTURER-EXTENSION>DEEP</MANUFACTURER-EXTENSION></EVENT-GROUP></EVENT-GROUPS>
+            </SERVICE-INTERFACE></SERVICE-INTERFACES>"#,
+        ));
+    }
+
     #[test]
     fn non_dotted_name() {
         assert_eq!(XmlElement::non_dotted_name("foo"), "foo");
@@ -2819,5 +2984,4 @@ mod tests {
 
         assert!(fb.validate_datatypes().is_ok());
     }
-
 }
