@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+    <fx:PROJECT ID="malformed_values">
+        <ho:SHORT-NAME>malformed_values</ho:SHORT-NAME>
+    </fx:PROJECT>
+    <fx:ELEMENTS>
+        <fx:DATATYPES>
+            <fx:DATATYPE xsi:type="fx:COMPLEX-DATATYPE-TYPE" ID="Struct">
+                <ho:SHORT-NAME>Struct</ho:SHORT-NAME>
+                <fx:COMPLEX-DATATYPE-CLASS>STRUCTURE</fx:COMPLEX-DATATYPE-CLASS>
+                <fx:MEMBERS>
+                    <fx:MEMBER ID="Struct_array">
+                        <ho:SHORT-NAME>array</ho:SHORT-NAME>
+                        <fx:DATATYPE-REF ID-REF="UInt8"/>
+                        <fx:ARRAY-DECLARATION>
+                            <fx:ARRAY-DIMENSION>
+                                <fx:DIMENSION>1</fx:DIMENSION>
+                                <fx:MINIMUM-SIZE>not-a-number</fx:MINIMUM-SIZE>
+                                <fx:MAXIMUM-SIZE>8</fx:MAXIMUM-SIZE>
+                                <fx:BIT-ALIGNMENT/>
+                            </fx:ARRAY-DIMENSION>
+                        </fx:ARRAY-DECLARATION>
+                        <fx:POSITION>0</fx:POSITION>
+                    </fx:MEMBER>
+                </fx:MEMBERS>
+            </fx:DATATYPE>
+        </fx:DATATYPES>
+    </fx:ELEMENTS>
+</fx:FIBEX>
