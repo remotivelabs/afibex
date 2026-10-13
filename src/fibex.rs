@@ -38,7 +38,7 @@ impl FibexError {
 
 impl fmt::Display for FibexError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.msg)
+        write!(f, "{}", self.msg)
     }
 }
 
@@ -375,7 +375,7 @@ pub struct GetterSetterNotifier {
                                 // manufacturer-extension
 }
 
-/// todo add EVENTS.... (EVENT = service:METHOD-TYPE)
+// todo add EVENTS.... (EVENT = service:METHOD-TYPE)
 
 /// we do need to lookup most of the times by method id so optimize datastructure for it
 #[derive(Debug)]
@@ -465,8 +465,8 @@ pub struct Parameter {
     pub notifier: Option<GetterSetterNotifier>,
 }
 
-/// service:FIELD-TYPE https://www.asam.net/xml/fbx/services/fibex4services.xsd
-/// mainly a Parameter with getter, setter, notifier. So we
+// service:FIELD-TYPE https://www.asam.net/xml/fbx/services/fibex4services.xsd
+// mainly a Parameter with getter, setter, notifier. So we
 /*
 #[derive(Debug)]
 pub struct Field {
@@ -1052,30 +1052,31 @@ impl FibexData {
         let mut buf = Vec::new();
         loop {
             match reader.read_event(&mut buf)? {
-                Event::Start(ref e) => match e.local_name() {
-                    b"SERVICE-INTERFACE" => {
-                        match self.parse_service_interface(e, reader){
-                            Ok(si)=>{
-                                let key = (si.service_identifier.unwrap_or_default(), si.api_version.0);
+                Event::Start(ref e) => {
+                    match e.local_name() {
+                        b"SERVICE-INTERFACE" => match self.parse_service_interface(e, reader) {
+                            Ok(si) => {
+                                let key =
+                                    (si.service_identifier.unwrap_or_default(), si.api_version.0);
                                 self.elements
                                     .services_map_by_sid_major
                                     .entry(key)
                                     .or_default()
-                                    .push(si);        
+                                    .push(si);
                             }
-                            Err(e)=>{
+                            Err(e) => {
                                 self.add_distinct_warning(format!("parse_service_interfaces: failed to parse service_interface: {}", e));
-                            }           
+                            }
+                        },
+                        _ => {
+                            self.add_distinct_warning(format!(
+                                "parse_service_interfaces: unprocessed Event::Start of '{}'",
+                                String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
+                            ));
+                            skip_element(e, reader)?;
                         }
                     }
-                    _ => {
-                        self.add_distinct_warning(format!(
-                            "parse_service_interfaces: unprocessed Event::Start of '{}'",
-                            String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
-                        ));
-                        skip_element(e, reader)?;
-                    }
-                },
+                }
                 Event::Empty(ref e) => self.add_distinct_warning(format!(
                     "parse_service_interface: Event::Empty of unknown '{}'",
                     String::from_utf8(e.local_name().to_vec()).unwrap_or_default()
@@ -1944,8 +1945,8 @@ impl FibexData {
         }
 
         // sort params by position:
-        input_params.sort_by(|a, b| a.position.cmp(&b.position));
-        return_params.sort_by(|a, b| a.position.cmp(&b.position));
+        input_params.sort_by_key(|a| a.position);
+        return_params.sort_by_key(|a| a.position);
 
         let key = &method_identifier.unwrap_or_default();
 
@@ -2358,7 +2359,7 @@ impl FibexData {
                         )}));
                     }
                 };
-                members.sort_by(|a, b| a.position.cmp(&b.position));
+                members.sort_by_key(|a| a.position);
                 DatatypeType::ComplexType(ComplexDatatype { class, members })
             }
             Some(s) if s == b"fx:COMMON-DATATYPE-TYPE" => {
@@ -3011,5 +3012,4 @@ mod tests {
 
         assert!(fb.validate_datatypes().is_ok());
     }
-
 }
