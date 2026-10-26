@@ -993,11 +993,13 @@ impl FibexData {
         reader: &mut Reader<T>,
     ) -> Result<Project, Box<dyn Error>> {
         let xml_e = read_element(e_project, reader, false)?;
-        let id = xml_e
-            .attr("ID")
-            .ok_or_else(|| FibexError::new("ID missing for project"))?;
+        // A project without an ID is read all the same: nothing refers to a project, and
+        // generated FIBEX files leave the attribute out.
         let proj = Project {
-            id: id.1.to_owned(),
+            id: xml_e
+                .attr("ID")
+                .map(|id| id.1.to_owned())
+                .unwrap_or_default(),
             short_name: xml_e
                 .child_by_name("SHORT-NAME")
                 .and_then(|c| c.text.to_owned()),
@@ -2888,6 +2890,17 @@ mod tests {
         let groups = &services[0].event_groups;
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].short_name.as_deref(), Some("Valid"));
+    }
+
+    #[test]
+    fn load_project_without_id() {
+        let mut fb = FibexData::new();
+        let r = fb.load_fibex_file(Path::new("tests/fibex_project_without_id.xml"));
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert_eq!(fb.projects.len(), 1);
+        assert_eq!(fb.projects[0].id, "");
+        assert_eq!(fb.projects[0].short_name.as_deref(), Some("generated"));
+        assert!(fb.elements.services_map_by_sid_major.contains_key(&(7, 1)));
     }
 
     #[test]
