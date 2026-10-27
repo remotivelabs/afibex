@@ -15,5 +15,10 @@
                 </service:API-VERSION>
             </fx:SERVICE-INTERFACE>
         </fx:SERVICE-INTERFACES>
+        <fx:DATATYPES>
+            <fx:DATATYPE xsi:type="fx:COMMON-DATATYPE-TYPE" ID="/UINT8">
+                <ho:SHORT-NAME>UINT8</ho:SHORT-NAME>
+            </fx:DATATYPE>
+        </fx:DATATYPES>
     </fx:ELEMENTS>
 </fx:FIBEX>

@@ -564,7 +564,8 @@ pub struct ComplexDatatype {
 
 #[derive(Debug)]
 pub enum DatatypeType {
-    Common(String), // coding ref as only member
+    /// The coding, which some generators leave out for a basic type named by its `SHORT-NAME`.
+    Common(Option<String>),
     ComplexType(ComplexDatatype),
     EnumType {
         coding_ref: String,
@@ -2376,13 +2377,7 @@ impl FibexData {
                 members.sort_by_key(|a| a.position);
                 DatatypeType::ComplexType(ComplexDatatype { class, members })
             }
-            Some(s) if s == b"fx:COMMON-DATATYPE-TYPE" => {
-                DatatypeType::Common(coding_ref.ok_or_else(|| {
-                    Box::new(FibexError::new(
-                        "CODING-REF missing for COMMON-DATATYPE-TYPE",
-                    ))
-                })?)
-            }
+            Some(s) if s == b"fx:COMMON-DATATYPE-TYPE" => DatatypeType::Common(coding_ref),
             Some(s) => {
                 self.add_distinct_warning(format!(
                     "parse_datatype: unhandled etype '{}'",
@@ -2914,6 +2909,10 @@ mod tests {
         assert_eq!(fb.projects[0].short_name.as_deref(), Some("generated"));
         let service = &fb.elements.services_map_by_sid_major[&(7, 1)][0];
         assert_eq!(service.instance_identifier, Some(4));
+        assert!(matches!(
+            fb.elements.datatypes_map_by_id["/UINT8"].datatype,
+            DatatypeType::Common(None)
+        ));
     }
 
     #[test]
