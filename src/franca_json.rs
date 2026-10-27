@@ -112,7 +112,8 @@ impl FibexData {
                         );
                     }
                 }
-                DatatypeType::Common(coding) => {
+                DatatypeType::Common(None) => {}
+                DatatypeType::Common(Some(coding)) => {
                     if !self.pi.codings.contains_key(coding) {
                         nr_errs += 1;
                         println!(
@@ -920,7 +921,7 @@ impl FibexData {
                         id: name.to_owned(),
                         short_name: None,
                         desc: None,
-                        datatype: DatatypeType::Common(name.to_owned()),
+                        datatype: DatatypeType::Common(Some(name.to_owned())),
                     },
                 );
             };
@@ -963,7 +964,7 @@ impl FibexData {
                 id: "String".to_owned(),
                 short_name: None,
                 desc: None,
-                datatype: DatatypeType::Common("String".to_owned()),
+                datatype: DatatypeType::Common(Some("String".to_owned())),
             },
         );
     }
