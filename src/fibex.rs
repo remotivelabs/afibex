@@ -394,9 +394,9 @@ pub struct Service {
     pub short_name: Option<String>,
     pub desc: Option<String>,
     pub service_identifier: Option<u16>, // todo by spec its defined as a string... but as we target someip (or dlt) we use u16 (PRS_SOMEIP_00038)
-    /// The instance the file describes, when it says: an `INSTANCE-IDENTIFIER` beside the
-    /// service identifier, which some generators add.
-    pub instance_identifier: Option<u16>,
+    /// The service's elements in namespaces that are not ASAM's, kept as they are for a reader
+    /// that knows them; the parser reads nothing into them.
+    pub extensions: Vec<Extension>,
     pub api_version: (u8, u8), // pair of major (the only one used on wire PRS_SOMEIP_00053), minor
     // methods: Vec<()>,
     // fields put directly into methods?
@@ -404,6 +404,18 @@ pub struct Service {
     pub event_groups: Vec<EventGroup>,
     pub methods_by_mid: HashMap<u16, MethodIdType>, // covers fields and events as well (getter, setter)
                                                     // MODIFIERS?
+}
+
+/// An element in a namespace that is not ASAM's, under an element the parser reads: kept as it
+/// is, text and all, for the reader that knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Extension {
+    /// The namespace the element is in.
+    pub namespace: String,
+    /// The element's local name.
+    pub name: String,
+    /// The element's text, trimmed; empty when it has none.
+    pub text: String,
 }
 
 /// service:EVENT-GROUP-TYPE https://www.asam.net/xml/fbx/services/fibex4services.xsd
@@ -885,6 +897,8 @@ pub struct FibexData {
     pub pi: ProcessingInformation,
     /// parse_warnings contains a list of distinct warnings occured during parsing
     pub parse_warnings: Vec<String>,
+    /// The namespaces the root element declares, by prefix.
+    namespaces: HashMap<String, String>,
 }
 
 impl FibexData {
@@ -904,8 +918,35 @@ impl FibexData {
                 codings: HashMap::new(),
             },
             parse_warnings: Vec::new(),
+            namespaces: HashMap::new(),
         }
     }
+
+    /// The namespace of an element whose prefix the root declares, when it is not an ASAM one:
+    /// the element is an extension of the file's own.
+    fn foreign_namespace(&self, name: &[u8]) -> Option<String> {
+        let colon = name.iter().position(|b| *b == b':')?;
+        let prefix = std::str::from_utf8(&name[..colon]).ok()?;
+        let namespace = self.namespaces.get(prefix)?;
+        (!namespace.starts_with("http://www.asam.net/xml")).then(|| namespace.clone())
+    }
+
+    /// An element in a foreign namespace, kept as it is.
+    fn extension<T: BufRead>(
+        &self,
+        e: &quick_xml::events::BytesStart,
+        reader: &mut Reader<T>,
+        empty_element: bool,
+    ) -> Result<Extension, Box<dyn Error>> {
+        let namespace = self.foreign_namespace(e.name()).unwrap_or_default();
+        let element = read_element(e, reader, empty_element)?;
+        Ok(Extension {
+            namespace,
+            name: element.name,
+            text: element.text.unwrap_or_default().trim().to_string(),
+        })
+    }
+
     pub fn load_fibex_file(&mut self, file: &Path) -> Result<(), Box<dyn Error>> {
         if let Some(ext) = file.extension() {
             if ext.eq_ignore_ascii_case("json") {
@@ -961,6 +1002,14 @@ impl FibexData {
         fibex: &quick_xml::events::BytesStart,
         reader: &mut Reader<T>,
     ) -> Result<(), Box<dyn Error>> {
+        for attribute in fibex.attributes().flatten() {
+            if let Some(prefix) = attribute.key.strip_prefix(b"xmlns:") {
+                self.namespaces.insert(
+                    String::from_utf8(prefix.to_vec())?,
+                    String::from_utf8(attribute.value.to_vec())?,
+                );
+            }
+        }
         let mut buf = Vec::new();
         loop {
             // todo match only for project, elements, processing-information
@@ -1103,7 +1152,7 @@ impl FibexData {
         let mut desc: Option<String> = None;
         let mut api_version: (u8, u8) = (0, 0);
         let mut service_identifier: Option<u16> = None;
-        let mut instance_identifier: Option<u16> = None;
+        let mut extensions = vec![];
         let mut methods_by_mid = HashMap::new();
         let mut fields = vec![];
         let mut event_groups = vec![];
@@ -1117,6 +1166,12 @@ impl FibexData {
 
         loop {
             match reader.read_event(&mut buf)? {
+                Event::Start(ref e) if self.foreign_namespace(e.name()).is_some() => {
+                    extensions.push(self.extension(e, reader, false)?);
+                }
+                Event::Empty(ref e) if self.foreign_namespace(e.name()).is_some() => {
+                    extensions.push(self.extension(e, reader, true)?);
+                }
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -1124,13 +1179,6 @@ impl FibexData {
                     b"DESC" => desc = Some(reader.read_text(e.name(), &mut Vec::new())?),
                     b"SERVICE-IDENTIFIER" => {
                         service_identifier = Some(
-                            reader
-                                .read_text(e.name(), &mut Vec::new())?
-                                .parse::<u16>()?,
-                        )
-                    }
-                    b"INSTANCE-IDENTIFIER" => {
-                        instance_identifier = Some(
                             reader
                                 .read_text(e.name(), &mut Vec::new())?
                                 .parse::<u16>()?,
@@ -1217,7 +1265,7 @@ impl FibexData {
             desc,
             api_version,
             service_identifier,
-            instance_identifier,
+            extensions,
             fields,
             event_groups,
             methods_by_mid,
@@ -2908,7 +2956,21 @@ mod tests {
         assert_eq!(fb.projects[0].id, "");
         assert_eq!(fb.projects[0].short_name.as_deref(), Some("generated"));
         let service = &fb.elements.services_map_by_sid_major[&(7, 1)][0];
-        assert_eq!(service.instance_identifier, Some(4));
+        assert_eq!(
+            service.extensions,
+            vec![Extension {
+                namespace: "urn:example:fibex".to_string(),
+                name: "INSTANCE-IDENTIFIER".to_string(),
+                text: "4".to_string(),
+            }]
+        );
+        assert!(
+            fb.parse_warnings
+                .iter()
+                .all(|w| !w.contains("INSTANCE-IDENTIFIER")),
+            "{:?}",
+            fb.parse_warnings
+        );
         assert!(matches!(
             fb.elements.datatypes_map_by_id["/UINT8"].datatype,
             DatatypeType::Common(None)
