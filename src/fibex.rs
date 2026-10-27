@@ -394,6 +394,9 @@ pub struct Service {
     pub short_name: Option<String>,
     pub desc: Option<String>,
     pub service_identifier: Option<u16>, // todo by spec its defined as a string... but as we target someip (or dlt) we use u16 (PRS_SOMEIP_00038)
+    /// The instance the file describes, when it says: an `INSTANCE-IDENTIFIER` beside the
+    /// service identifier, which some generators add.
+    pub instance_identifier: Option<u16>,
     pub api_version: (u8, u8), // pair of major (the only one used on wire PRS_SOMEIP_00053), minor
     // methods: Vec<()>,
     // fields put directly into methods?
@@ -1099,6 +1102,7 @@ impl FibexData {
         let mut desc: Option<String> = None;
         let mut api_version: (u8, u8) = (0, 0);
         let mut service_identifier: Option<u16> = None;
+        let mut instance_identifier: Option<u16> = None;
         let mut methods_by_mid = HashMap::new();
         let mut fields = vec![];
         let mut event_groups = vec![];
@@ -1119,6 +1123,13 @@ impl FibexData {
                     b"DESC" => desc = Some(reader.read_text(e.name(), &mut Vec::new())?),
                     b"SERVICE-IDENTIFIER" => {
                         service_identifier = Some(
+                            reader
+                                .read_text(e.name(), &mut Vec::new())?
+                                .parse::<u16>()?,
+                        )
+                    }
+                    b"INSTANCE-IDENTIFIER" => {
+                        instance_identifier = Some(
                             reader
                                 .read_text(e.name(), &mut Vec::new())?
                                 .parse::<u16>()?,
@@ -1205,6 +1216,7 @@ impl FibexData {
             desc,
             api_version,
             service_identifier,
+            instance_identifier,
             fields,
             event_groups,
             methods_by_mid,
@@ -2900,7 +2912,8 @@ mod tests {
         assert_eq!(fb.projects.len(), 1);
         assert_eq!(fb.projects[0].id, "");
         assert_eq!(fb.projects[0].short_name.as_deref(), Some("generated"));
-        assert!(fb.elements.services_map_by_sid_major.contains_key(&(7, 1)));
+        let service = &fb.elements.services_map_by_sid_major[&(7, 1)][0];
+        assert_eq!(service.instance_identifier, Some(4));
     }
 
     #[test]
