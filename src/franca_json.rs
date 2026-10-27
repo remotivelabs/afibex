@@ -464,6 +464,7 @@ impl FibexData {
                         short_name: short_name.map(|f| f.to_owned()),
                         desc: desc.map(|f| f.to_owned()),
                         service_identifier,
+                        instance_identifier: None,
                         api_version: (
                             u8::try_from(major.unwrap_or_default()).unwrap_or_default(),
                             u8::try_from(minor.unwrap_or_default()).unwrap_or_default(),
