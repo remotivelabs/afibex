@@ -87,6 +87,23 @@ impl XmlElement {
     }
 }
 
+/// The next event inside an element: the end of the file there is an error, where the caller
+/// would otherwise wait for an end tag that never comes.
+fn read_event_inside<'b, T: BufRead>(
+    reader: &mut Reader<T>,
+    buf: &'b mut Vec<u8>,
+) -> Result<Event<'b>, quick_xml::Error> {
+    match reader.read_event(buf)? {
+        Event::Eof => Err(quick_xml::Error::UnexpectedEof("an element".to_string())),
+        event => Ok(event),
+    }
+}
+
+/// Whether `error` says the file is not XML, which no element can be skipped past.
+fn is_xml_error(error: &(dyn Error + 'static)) -> bool {
+    error.is::<quick_xml::Error>()
+}
+
 fn read_element<T: BufRead>(
     start_e: &quick_xml::events::BytesStart,
     reader: &mut Reader<T>,
@@ -111,7 +128,7 @@ fn read_element<T: BufRead>(
     let mut buf = Vec::with_capacity(1024); // todo better default?
     if !empty_element {
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => xml_e.children.push(read_element(e, reader, false)?),
                 Event::Empty(ref e) => xml_e.children.push(read_element(e, reader, true)?),
                 Event::Text(ref e) => {
@@ -139,7 +156,7 @@ fn skip_element<T: BufRead>(
     let mut buf = Vec::with_capacity(1024); // better default value?
 
     loop {
-        match reader.read_event(&mut buf)? {
+        match read_event_inside(reader, &mut buf)? {
             Event::Start(ref _e) => nesting_level += 1,
             // can be ignored Event::Empty(ref e) => skip_element(e, reader, true)?,
             Event::End(ref e) => {
@@ -1013,7 +1030,7 @@ impl FibexData {
         let mut buf = Vec::new();
         loop {
             // todo match only for project, elements, processing-information
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"PROJECT" => {
                         let proj = self.parse_project(e, reader)?;
@@ -1068,7 +1085,7 @@ impl FibexData {
     ) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     // todo CHANNELS, ECUS, PACKAGES
                     b"SERVICE-INTERFACES" => self.parse_service_interfaces(e, reader)?,
@@ -1106,7 +1123,7 @@ impl FibexData {
     ) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => {
                     match e.local_name() {
                         b"SERVICE-INTERFACE" => match self.parse_service_interface(e, reader) {
@@ -1119,6 +1136,7 @@ impl FibexData {
                                     .or_default()
                                     .push(si);
                             }
+                            Err(e) if is_xml_error(e.as_ref()) => return Err(e),
                             Err(e) => {
                                 self.add_distinct_warning(format!("parse_service_interfaces: failed to parse service_interface: {}", e));
                             }
@@ -1165,7 +1183,7 @@ impl FibexData {
             .ok_or_else(|| FibexError::new("ID missing in Service"))?;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) if self.foreign_namespace(e.name()).is_some() => {
                     extensions.push(self.extension(e, reader, false)?);
                 }
@@ -1233,6 +1251,7 @@ impl FibexData {
                     b"EVENT-GROUPS" => {} // we ignore to get the EVENT-GROUP events
                     b"EVENT-GROUP" => match self.parse_event_group(e, reader) {
                         Ok(event_group) => event_groups.push(event_group),
+                        Err(err) if is_xml_error(err.as_ref()) => return Err(err),
                         Err(err) => {
                             self.add_distinct_warning(format!(
                                 "parse_service_interface: Ignoring event group due to Err '{}'",
@@ -1292,7 +1311,7 @@ impl FibexData {
             .ok_or_else(|| FibexError::new("ID missing in CHANNEL"))?;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -1423,7 +1442,7 @@ impl FibexData {
             .ok_or_else(|| FibexError::new("ID missing in ECU"))?;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -1485,7 +1504,7 @@ impl FibexData {
             .ok_or_else(|| FibexError::new("ID missing in FRAME"))?;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -1604,7 +1623,7 @@ impl FibexData {
             .ok_or_else(|| FibexError::new("ID missing in SIGNAL"))?;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -1681,7 +1700,7 @@ impl FibexData {
             .ok_or_else(|| FibexError::new("ID missing in PDU"))?;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -1794,7 +1813,7 @@ impl FibexData {
         let mut dynamic_part: Option<DynamicPart> = None;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SWITCH" => {
                         let xml_e = read_element(e, reader, false)?;
@@ -1941,7 +1960,7 @@ impl FibexData {
         let is_event = e_method.local_name() == b"EVENT";
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -1956,18 +1975,17 @@ impl FibexData {
                     }
                     b"INPUT-PARAMETERS" | b"RETURN-PARAMETERS" => {} // ignore, we parse the parameters directly
                     b"INPUT-PARAMETER" | b"RETURN-PARAMETER" => {
-                        let param = self.parse_parameter(e, reader, false);
-                        if let Ok(param) = param {
-                            match e.local_name() {
+                        match self.parse_parameter(e, reader, false) {
+                            Ok(param) => match e.local_name() {
                                 b"INPUT-PARAMETER" => &mut input_params,
                                 _ => &mut return_params,
                             }
-                            .push(param);
-                        } else {
-                            self.add_distinct_warning(format!(
+                            .push(param),
+                            Err(err) if is_xml_error(err.as_ref()) => return Err(err),
+                            Err(err) => self.add_distinct_warning(format!(
                                 "parse_method: Ignoring parameter due to Err '{}'",
-                                param.unwrap_err()
-                            ));
+                                err
+                            )),
                         }
                         //let key = method.method_identifier.unwrap_or_default();
                         //methods_by_mid.insert(key, method); // todo ignore duplicates?
@@ -2057,7 +2075,7 @@ impl FibexData {
         }
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -2139,7 +2157,7 @@ impl FibexData {
             .ok_or_else(|| FibexError::new("ID missing in Parameter"))?;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -2291,7 +2309,7 @@ impl FibexData {
     ) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"DATATYPE" => {
                         let dt = self.parse_datatype(e, reader)?; // todo skip single failures?
@@ -2346,7 +2364,7 @@ impl FibexData {
         let mut coding_ref: Option<String> = None;
 
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"SHORT-NAME" => {
                         short_name = Some(reader.read_text(e.name(), &mut Vec::new())?)
@@ -2371,6 +2389,7 @@ impl FibexData {
                     b"MEMBERS" => {} // ignore we parse MEMBER directly
                     b"MEMBER" => match self.parse_parameter(e, reader, false) {
                         Ok(param) => members.push(param),
+                        Err(e) if is_xml_error(e.as_ref()) => return Err(e),
                         Err(e) => {
                             // e.g. if DATATYPE-REF is missing/empty (some faulty fibex generators)
                             self.add_distinct_warning(format!(
@@ -2455,7 +2474,7 @@ impl FibexData {
     ) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"CODINGS" => self.parse_codings(e, reader)?,
                     _ => {
@@ -2484,7 +2503,7 @@ impl FibexData {
     ) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         loop {
-            match reader.read_event(&mut buf)? {
+            match read_event_inside(reader, &mut buf)? {
                 Event::Start(ref e) => match e.local_name() {
                     b"CODING" => {
                         let coding = self.parse_coding(e, reader)?;
@@ -2975,6 +2994,61 @@ mod tests {
             fb.elements.datatypes_map_by_id["/UINT8"].datatype,
             DatatypeType::Common(None)
         ));
+    }
+
+    /// `fixture` with `edit` applied, loaded on a thread that is given up on after a while, so
+    /// that a load that never returns fails the test rather than hanging it.
+    fn load_edited(
+        fixture: &str,
+        name: &str,
+        edit: impl FnOnce(String) -> String,
+    ) -> Result<(), String> {
+        let text = std::fs::read_to_string(fixture).unwrap();
+        let path = std::env::temp_dir().join(format!("afibex-{}-{}", std::process::id(), name));
+        std::fs::write(&path, edit(text)).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut fb = FibexData::new();
+            let loaded = fb.load_fibex_file(&path).map_err(|e| e.to_string());
+            let _ = std::fs::remove_file(&path);
+            let _ = sender.send(loaded);
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the load returns")
+    }
+
+    #[test]
+    fn load_fails_on_a_file_cut_inside_an_element() {
+        let r = load_edited("tests/fibex_call_semantic.xml", "cut.xml", |text| {
+            let at = text.find("<service:MAJOR>").unwrap();
+            text[..at].to_string()
+        });
+        assert!(r.unwrap_err().contains("EOF"));
+    }
+
+    #[test]
+    fn load_fails_on_an_end_tag_that_closes_another_element_inside_a_service_interface() {
+        let r = load_edited("tests/fibex_call_semantic.xml", "mismatched.xml", |text| {
+            text.replacen(
+                "<service:MAJOR>1</service:MAJOR>",
+                "<service:MAJOR>1</service:MINOR>",
+                1,
+            )
+        });
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn load_fails_on_a_character_reference_that_is_no_character_inside_a_method_parameter() {
+        let r = load_edited("tests/fibex1.xml", "parameter.xml", |text| {
+            text.replacen(
+                "<fx:CODING-REF ID-REF=\"CURRENT_PROJECT_UInt8_invalidValue255_coding\"/>",
+                "<fx:CODING-REF ID-REF=\"CURRENT_PROJECT_UInt8_invalidValue255_coding\"/><fx:BIT-LENGTH>&#xZZ;</fx:BIT-LENGTH>",
+                1,
+            )
+        });
+        assert!(r.is_err(), "{r:?}");
     }
 
     #[test]
