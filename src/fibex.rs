@@ -116,6 +116,23 @@ fn is_xml_error(error: &(dyn Error + 'static)) -> bool {
     )
 }
 
+/// The error that stopped reading inside the element `start` opens, after reading past the
+/// element's end, so the caller that skips the element goes on with its next sibling. An error
+/// that leaves no XML to read is returned as it is.
+fn read_past<T: BufRead>(
+    start: &quick_xml::events::BytesStart,
+    reader: &mut Reader<T>,
+    error: Box<dyn Error>,
+) -> Box<dyn Error> {
+    if is_xml_error(error.as_ref()) {
+        return error;
+    }
+    match reader.read_to_end(start.name(), &mut Vec::new()) {
+        Ok(()) => error,
+        Err(broken) => broken.into(),
+    }
+}
+
 fn read_element<T: BufRead>(
     start_e: &quick_xml::events::BytesStart,
     reader: &mut Reader<T>,
@@ -1172,7 +1189,17 @@ impl FibexData {
         }
         Ok(())
     }
+    /// The service the element `e_si` opens; on an error, read past the element's end.
     fn parse_service_interface<T: BufRead>(
+        &mut self,
+        e_si: &quick_xml::events::BytesStart,
+        reader: &mut Reader<T>,
+    ) -> Result<Service, Box<dyn Error>> {
+        self.read_service_interface(e_si, reader)
+            .map_err(|error| read_past(e_si, reader, error))
+    }
+
+    fn read_service_interface<T: BufRead>(
         &mut self,
         e_si: &quick_xml::events::BytesStart,
         reader: &mut Reader<T>,
@@ -1269,8 +1296,6 @@ impl FibexData {
                                 "parse_service_interface: Ignoring event group due to Err '{}'",
                                 err
                             ));
-                            // a rejected group stops at a child boundary, so skip its remaining children
-                            skip_element(e, reader)?
                         }
                     },
                     _ => {
@@ -2060,7 +2085,17 @@ impl FibexData {
         Ok((mid, *key))
     }
 
+    /// The event group the element `e_group` opens; on an error, read past the element's end.
     fn parse_event_group<T: BufRead>(
+        &mut self,
+        e_group: &quick_xml::events::BytesStart,
+        reader: &mut Reader<T>,
+    ) -> Result<EventGroup, Box<dyn Error>> {
+        self.read_event_group(e_group, reader)
+            .map_err(|error| read_past(e_group, reader, error))
+    }
+
+    fn read_event_group<T: BufRead>(
         &mut self,
         e_group: &quick_xml::events::BytesStart,
         reader: &mut Reader<T>,
@@ -2142,12 +2177,25 @@ impl FibexData {
         })
     }
 
+    /// The parameter the element `e_pa` opens; on an error, read past the element's end.
     fn parse_parameter<T: BufRead>(
         &mut self,
         e_pa: &quick_xml::events::BytesStart,
         reader: &mut Reader<T>,
         is_field: bool,
     ) -> Result<Parameter, Box<dyn Error>> {
+        self.read_parameter(e_pa, reader, is_field)
+            .map_err(|error| read_past(e_pa, reader, error))?
+    }
+
+    /// The parameter, or why it is invalid once read to its end; an error that stopped reading
+    /// inside the element is the outer one.
+    fn read_parameter<T: BufRead>(
+        &mut self,
+        e_pa: &quick_xml::events::BytesStart,
+        reader: &mut Reader<T>,
+        is_field: bool,
+    ) -> Result<Result<Parameter, Box<dyn Error>>, Box<dyn Error>> {
         let mut buf = Vec::with_capacity(4 * 1024); // todo better default
         let mut short_name: Option<String> = None;
         let mut desc: Option<String> = None;
@@ -2291,11 +2339,11 @@ impl FibexData {
             }
         }
 
-        let datatype_ref = datatype_ref.ok_or_else(|| {
-            Box::new(FibexError {
+        let Some(datatype_ref) = datatype_ref else {
+            return Ok(Err(Box::new(FibexError {
                 msg: format!("DATATYPE-REF missing for PARAMETER ID={}", id),
-            })
-        })?;
+            })));
+        };
 
         let position = position.unwrap_or(0);
 
@@ -2312,7 +2360,7 @@ impl FibexData {
             setter,
             notifier,
         };
-        Ok(p)
+        Ok(Ok(p))
     }
     fn parse_datatypes<T: BufRead>(
         &mut self,
@@ -3018,16 +3066,15 @@ mod tests {
         load_edited_bytes(fixture, name, |bytes| {
             edit(String::from_utf8(bytes).unwrap()).into_bytes()
         })
-        .map(|_warnings| ())
+        .map(|_loaded| ())
     }
 
-    /// The fixture, edited as bytes so the file need not be UTF-8, loaded on its own thread;
-    /// the warnings the load left.
+    /// The fixture, edited as bytes so the file need not be UTF-8, loaded on its own thread.
     fn load_edited_bytes(
         fixture: &str,
         name: &str,
         edit: impl FnOnce(Vec<u8>) -> Vec<u8>,
-    ) -> Result<Vec<String>, String> {
+    ) -> Result<FibexData, String> {
         let bytes = std::fs::read(fixture).unwrap();
         let path = std::env::temp_dir().join(format!("afibex-{}-{}", std::process::id(), name));
         std::fs::write(&path, edit(bytes)).unwrap();
@@ -3036,7 +3083,7 @@ mod tests {
             let mut fb = FibexData::new();
             let loaded = fb
                 .load_fibex_file(&path)
-                .map(|()| fb.parse_warnings.clone())
+                .map(|()| fb)
                 .map_err(|e| e.to_string());
             let _ = std::fs::remove_file(&path);
             let _ = sender.send(loaded);
@@ -3081,7 +3128,7 @@ mod tests {
                 )
                 .into_bytes()
         });
-        let warnings = r.expect("the file loads");
+        let warnings = r.expect("the file loads").parse_warnings;
         assert!(
             warnings.iter().any(|w| w.contains("Ignoring parameter")),
             "{warnings:?}"
@@ -3101,8 +3148,8 @@ mod tests {
         assert!(r.is_ok(), "{r:?}");
     }
 
-    /// A parameter whose text is not UTF-8, a Latin-1 `DESC` in a file declared so, is one
-    /// element's problem: skipped with a warning, the file loads.
+    /// A parameter whose text is not UTF-8 in a file declared UTF-8, Latin-1 bytes in its `DESC`,
+    /// is one element's problem: skipped with a warning, the file loads.
     #[test]
     fn load_skips_a_parameter_whose_text_is_not_utf8() {
         let r = load_edited_bytes("tests/fibex1.xml", "latin1.xml", |bytes| {
@@ -3113,13 +3160,12 @@ mod tests {
                     "<ho:SHORT-NAME>Param1</ho:SHORT-NAME><ho:DESC>Gr\u{1}\u{2}e</ho:DESC>",
                     1,
                 )
-                .replacen("encoding=\"UTF-8\"", "encoding=\"ISO-8859-1\"", 1)
                 .into_bytes();
             let at = edited.windows(2).position(|w| w == [1, 2]).unwrap();
             edited.splice(at..at + 2, [0xF6, 0xDF]);
             edited
         });
-        let warnings = r.expect("the file loads");
+        let warnings = r.expect("the file loads").parse_warnings;
         assert!(
             warnings.iter().any(|w| w.contains("Ignoring parameter")),
             "{warnings:?}"
@@ -3127,7 +3173,8 @@ mod tests {
     }
 
     /// An entity the escaper does not know, `&nbsp;` in a parameter's name, is one element's
-    /// problem too.
+    /// problem too. The skipped parameter's remaining children stay its own: its `DESC` is not
+    /// taken for the method's.
     #[test]
     fn load_skips_a_parameter_whose_name_holds_an_unknown_entity() {
         let r = load_edited_bytes("tests/fibex1.xml", "nbsp.xml", |bytes| {
@@ -3135,15 +3182,105 @@ mod tests {
                 .unwrap()
                 .replacen(
                     "<ho:SHORT-NAME>Param1</ho:SHORT-NAME>",
-                    "<ho:SHORT-NAME>Param&nbsp;1</ho:SHORT-NAME>",
+                    "<ho:SHORT-NAME>Param&nbsp;1</ho:SHORT-NAME><ho:DESC>param text</ho:DESC>",
                     1,
                 )
                 .into_bytes()
         });
-        let warnings = r.expect("the file loads");
+        let fb = r.expect("the file loads");
         assert!(
-            warnings.iter().any(|w| w.contains("Ignoring parameter")),
-            "{warnings:?}"
+            fb.parse_warnings
+                .iter()
+                .any(|w| w.contains("Ignoring parameter")),
+            "{:?}",
+            fb.parse_warnings
+        );
+        let service = &fb.elements.services_map_by_sid_major[&(64098, 1)][0];
+        let MethodIdType::Method(method) = &service.methods_by_mid[&1000] else {
+            panic!("method 1000 is a method");
+        };
+        assert!(method.input_params.is_empty());
+        assert!(
+            method
+                .desc
+                .as_deref()
+                .unwrap()
+                .starts_with("Called by clients"),
+            "{:?}",
+            method.desc
+        );
+    }
+
+    /// A skipped event group's remaining children stay its own: its `SHORT-NAME` is not taken for
+    /// the service's.
+    #[test]
+    fn load_skips_an_event_group_whose_desc_holds_an_unknown_entity() {
+        let r = load_edited_bytes(
+            "tests/fibex_event_groups_rejected.xml",
+            "group-nbsp.xml",
+            |bytes| {
+                String::from_utf8(bytes)
+                    .unwrap()
+                    .replacen(
+                        "<ho:SHORT-NAME>Valid</ho:SHORT-NAME>",
+                        "<ho:DESC>a&nbsp;group</ho:DESC><ho:SHORT-NAME>Valid</ho:SHORT-NAME>",
+                        1,
+                    )
+                    .into_bytes()
+            },
+        );
+        let fb = r.expect("the file loads");
+        let service = &fb.elements.services_map_by_sid_major[&(100, 1)][0];
+        assert_eq!(service.short_name.as_deref(), Some("SimpleService"));
+        assert!(
+            service.event_groups.is_empty(),
+            "{:?}",
+            service.event_groups
+        );
+    }
+
+    /// A skipped member's remaining children stay its own: its `DESC` is not taken for the
+    /// datatype's.
+    #[test]
+    fn load_skips_a_member_whose_name_holds_an_unknown_entity() {
+        let r = load_edited_bytes("tests/fibex1.xml", "member-nbsp.xml", |bytes| {
+            String::from_utf8(bytes)
+                .unwrap()
+                .replacen(
+                    "<ho:SHORT-NAME>member1</ho:SHORT-NAME>",
+                    "<ho:SHORT-NAME>member&nbsp;1</ho:SHORT-NAME>",
+                    1,
+                )
+                .into_bytes()
+        });
+        let fb = r.expect("the file loads");
+        let datatype =
+            &fb.elements.datatypes_map_by_id["de_mbehr_testservices_TestService1API_DataStruct"];
+        assert_eq!(datatype.desc, None);
+    }
+
+    /// A skipped service interface's remaining children are not read as the next ones'.
+    #[test]
+    fn load_skips_a_service_interface_whose_name_holds_an_unknown_entity() {
+        let r = load_edited_bytes("tests/fibex1.xml", "service-nbsp.xml", |bytes| {
+            String::from_utf8(bytes)
+                .unwrap()
+                .replacen(
+                    "<ho:SHORT-NAME>TestService1API</ho:SHORT-NAME>",
+                    "<ho:SHORT-NAME>Test&nbsp;Service1API</ho:SHORT-NAME>",
+                    1,
+                )
+                .into_bytes()
+        });
+        let fb = r.expect("the file loads");
+        assert!(!fb
+            .elements
+            .services_map_by_sid_major
+            .contains_key(&(64098, 1)));
+        assert!(
+            fb.parse_warnings.iter().all(|w| !w.contains("unprocessed")),
+            "{:?}",
+            fb.parse_warnings
         );
     }
 
